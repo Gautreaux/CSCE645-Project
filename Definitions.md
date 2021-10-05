@@ -20,6 +20,8 @@ Manufacturing as a Service - ???
 
 Material - the unit into which the bin needs to be packed.
 
+No Fit Polygon - ???
+
 Node - a single resource to be used in the packing problem
 
 NP-Hard - ???

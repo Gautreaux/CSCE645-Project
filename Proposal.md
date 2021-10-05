@@ -36,6 +36,7 @@ The goals of this project are as follows:
   * Nodes should be able to cleanly enter and leave the pool, but crashes of the node and the scheduler are not expected.
   * Service contract in a timely and reliable manner.
 * Stretch Goals:
+  * A Proper Polygon based GPU accelerated implementation
   * Multi-node collaboration for _contract_ efficiency
   * Multi-node scheduling for _resource_ efficiency
   * Nice user interface for the Packing Farm
