@@ -1,0 +1,44 @@
+
+% for overriding the quote behavior
+\usepackage{framed}
+\usepackage{quoting}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{mathtools}
+\usepackage{gensymb}
+
+\definecolor{bgcolor}{HTML}{DDDDDD}
+\colorlet{shadecolor}{bgcolor}
+
+\newenvironment{shadedquotation}
+ {\begin{shaded*}
+  \quoting[leftmargin=1em, rightmargin=0pt, vskip=0pt, font=itshape]
+ }
+ {\endquoting
+ \end{shaded*}
+ }
+
+%
+\def\quote{\shadedquotation}
+\def\endquote{\endshadedquotation}
+
+
+% for adding a background color to monospaced
+\definecolor{bgcolor_tt}{HTML}{FFEDD6}
+\definecolor{ttcolor}{HTML}{8A0000}
+\let\oldtexttt\texttt
+\renewcommand{\texttt}[1]{
+\colorbox{bgcolor_tt}{\textcolor{ttcolor}{\oldtexttt{#1}}}
+}
+
+% for adding a background to verbatim
+
+
+% for no image floating
+\let\oldfigure=\figure
+\let\oldendfigure=\endfigure
+\renewenvironment{figure}[1][]
+ {\oldfigure[H]
+ }
+ {\oldendfigure
+ }
