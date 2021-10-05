@@ -1,5 +1,7 @@
 # Proposal
 
+> Disclaimer: I'm actually expecting to not complete this project, or at least be unhappy with the results. This is a very very hard problem and I am well aware of this fact. Finding a solution over the next six-ish weeks will be difficult. Really, I just wanted a project where I could practice GPU programming.
+
 ### A word on why
 
 For this project, I propose the development and implementation of a two-round raster based two dimensional polygon packing system. This system is modeled for a theoretical production workflow based on __Contract Manufacturing__ principles (a.k.a. __Manufacturing as a Service__). In this theoretical model, the manufacturer offers the service of two-dimensional sheet operations, such as CNC Routing. The manufacturer provides this service turn-key, where the customer uploads parts directly and receives physical parts sometime in the future. To offer this service at a competitive cost, the manufacturer must minimize waste of the stock material. Likewise the manufacturer must quickly and accurately price contracts.

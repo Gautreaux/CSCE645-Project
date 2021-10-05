@@ -14,6 +14,8 @@ CUDA - ???
 
 Graphics Processing Unit (GPU) - ???
 
+Guillotine Cut - ???
+
 Kernel Convolution - ???
 
 Manufacturing as a Service - ???
