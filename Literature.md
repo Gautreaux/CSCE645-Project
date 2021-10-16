@@ -26,12 +26,11 @@ Sy reports similar behavior. The ordering of polygons chosen greatly impacts the
 
 ## That runs on a GPU
 
-There is not much literature on the use of a GPU.
+There is not much literature on the use of a GPU for this problem.
 
 There exists an interesting example of GPU accelerated processing by Wei Yang on Github [Yang]. This example focuses on packing rectangular polygons based on a binary-tree subdivision of the space. The example claims a nine times improvement over a CPU based implementation of the same algorithm. This is an interesting example of potential improvement possible though GPU based processing.
 
 There exists another paper on the packing of rectangular polygons via GPU acceleration [Rashid]. In this paper, the GPU based methods show an approximate 35% improvement in solution quality. Runtime discussion is omitted. The GPU is utilized to parallelize the heuristic search to determine the next best fit of parts. However, since this algorithm works on rectangles, it is unhelpful to the current problem.
-
 
 ## Backed by a raster-based implementation
 
