@@ -67,33 +67,26 @@ if not valid:
 # now lets reduce to 2d points:
 laser_normal = valid
 
-proj_points = []
+plane_pts = []
 
 in_plane_edges = defaultdict(int)
 
 # for all the points, project onto the plane
 #   with normal found earlier and through origin
-for p in laser_mesh.points:
+for p, norm in zip(laser_mesh.points, laser_mesh.get_unit_normals()):
+    if not (norm == laser_normal).all():
+        continue
+
     x1, y1, z1, x2, y2, z2, x3, y3, z3 = p
     p_tuples = [(x1, y1, z1), (x2, y2, z2), (x3, y3, z3)]
-
-    # print(p_tuples)
-
-    tmp = []
-
-    for p in p_tuples:
-        m = dot(laser_normal, p)
-        p_proj = tuple(map(lambda x, y: round(x -m*y,6), p, laser_normal))
-        # print(p_proj)
-        tmp.append(p_proj)
+    plane_pts.extend(p_tuples)
 
     s = set()
-    s.add((tmp[0], tmp[1]))
-    s.add((tmp[1], tmp[2]))
-    s.add((tmp[0], tmp[2]))
+    s.add((p_tuples[0], p_tuples[1]))
+    s.add((p_tuples[1], p_tuples[2]))
+    s.add((p_tuples[0], p_tuples[2]))
 
-    if len(s) != 3:
-        proj_points.extend(tmp)
+    assert(len(s) == 3)
 
     for m,n in s:
         if m == n:
@@ -101,26 +94,27 @@ for p in laser_mesh.points:
         if n < m:
             t = m
             m = n
-            n = m
-        assert(m <= n)
+            n = t
+        assert(m < n)
 
         in_plane_edges[(m,n)] += 1
 
-# reduce to only the edges that we care about
-s = set(proj_points)
-relevent_edges = set()
-for p1, p2 in in_plane_edges:
-    if p1 in s and p2 in s:
-        relevent_edges.add((p1,p2))
+
+relevant_edges = {k for k,v in in_plane_edges.items() if v == 1}
+
+relevant_points = set()
+for edge in relevant_edges:
+    relevant_points.add(edge[0])
+    relevant_points.add(edge[1])
 
 # rotate the 3d points so that the laser normal aligns to the ideal normal
 # TODO
 assert(laser_normal == IDEAL_NORMAL)
 
 # plot the points for sanity
-plt.scatter(list(map(lambda x: x[0], proj_points)), list(map(lambda x: x[2], proj_points)))
+plt.scatter(list(map(lambda x: x[0], relevant_points)), list(map(lambda x: x[2], relevant_points)))
 
-for edge in relevent_edges:
+for edge in relevant_edges:
     plt.plot([edge[0][0], edge[1][0]],[edge[0][2], edge[1][2]])
 plt.axis('equal')
 plt.show()

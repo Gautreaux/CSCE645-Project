@@ -4,3 +4,6 @@ temp.md
 
 *.xz
 /adhoc/CGAL-5.3
+
+**/__pycache__/**
+generators/dataset/dump/**
