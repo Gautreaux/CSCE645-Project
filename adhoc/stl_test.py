@@ -2,7 +2,7 @@
 from collections import defaultdict
 from typing import Counter
 import itertools
-from numpy import ceil, floor
+from numpy import ceil, floor, int_
 import random
 from stl import mesh, Mode
 from matplotlib import pyplot as plt
@@ -266,6 +266,97 @@ test_points_qty_y = round(len(test_points_y))
 
 print(f"Total test points grid {test_points_qty_x}x{test_points_qty_y} = {test_points_qty_x * test_points_qty_y}")
 
+# TODO - need to ensure that 0,0 is on the 
+# step 1, build the quick collision check map
+max_r_sq = max_x + max_y
+
+def isPointInSegDomain(point, seg):
+    """
+    Return True iff the point is on the segment, endpoint inclusive
+    Assumes, but does not check, that point is collinear with the segment endpoints
+    Failure to enforce this condition __WILL__ result in incorrect behavior
+    """
+    p_1, p_2 = seg
+
+    if point == p_1 or point == p_2:
+        return True
+
+    # create the vectors from the point to each of the endpoints
+    v1 = tuple(map(lambda x,y: x-y, p_1, point))
+    v2 = tuple(map(lambda x,y: x-y, p_2, point))
+
+    # check if the x components are opposite directions
+    if v1[0] > 0 != v2[0] > 0:
+        return True
+    
+    # edge case if the segment is vertical
+    if v1[1] > 0 != v2[1] > 0:
+        return True
+
+    return False
+
+def isPointOnSegment(point, seg):
+    """
+    Return True iff
+    1. The point is collinear with the segments
+    2. The point is in the domain of the segments, endpoint inclusive
+    """
+
+    p_1 = seg[0]
+    p_2 = seg[1]
+    
+    if point == p_1 or point == p_2:
+        return True
+
+    v1 = get_unit_vector(point, p_1)
+    v2 = get_unit_vector(point, p_2)
+
+    v2_neg = (-v2[0], -v2[1])
+
+    return v1 == v2_neg
+
+def getSegmentIntersection(seg_1, seg_2):
+    """Return the point of intersection of the two segments if they interset, otherwise return None"""
+    x1 = seg_1[0][0]
+    y1 = seg_1[0][1]
+    x2 = seg_2[1][0]
+    y2 = seg_2[1][1]
+    x3 = seg_2[0][0]
+    y3 = seg_2[0][1]
+    x4 = seg_2[1][0]
+    y4 = seg_2[1][1]
+
+    D = (x1-x2)*(y3-y4)-(y1-y2)*(x3-x4)
+
+    a = (x1 * y2 - y1 * x2)
+    b = (x3 * y4 - y3 * x4)
+
+    int_x = round((a * (x3 - x4) - b * (x1 - x2)) / D, 6)
+    int_y = round((a * (y3 - y4) - b * (y1 - y2)) / D, 6)
+
+    p = (int_x, int_y)
+
+    if isPointInSegDomain(p, seg_1) and isPointInSegDomain(p, seg_2):
+        return p
+    return None
+
+
+def isPointInside(point):
+    """Return True iff this point is inside the polygon, or on the boundary"""
+
+    test_seg = (point, (-1, -1))
+
+    intersect_point = set()
+
+    for seg in relevant_edges:
+        if isPointOnSegment(point, seg):
+            return True
+        p = getSegmentIntersection(test_seg, seg)
+        if p:
+            intersect_point.add(p)
+
+    return (len(intersect_point) % 2) == 1
+
 test_regions = []
 test_has_intersection = []
 
@@ -276,27 +367,19 @@ for i in range(len(test_points_x)-1):
         c = (test_points_x[i+1], test_points_y[j+1])
         d = (test_points_x[i], test_points_y[j+1])
 
-        this_region = (a,b,c,d)
-
-        
-        # this has intersection is a simple check if any plot point is inside the test region
         this_has_intersection = 0
-        for p_x, _, p_y in relevant_points:
-            # TODO - this will break when the relevant_points representation is fixed
-            if p_x <= b[0] and p_x >= a[0] and p_y <= c[1] and p_y >= a[1]:
+        for p in [a,b,c,d]:
+            if isPointInside(p):
                 this_has_intersection = 1
                 break
 
-        if this_has_intersection:
-            test_regions.append(this_region)
-            test_has_intersection.append(this_has_intersection)
-        
-        # need to do a more expensive check if the region collides with 
-        # AAAAND thats where I stop for tonight
-
+        this_region = (a,b,c,d)
 
         test_regions.append(this_region)
         test_has_intersection.append(this_has_intersection)
+
+        if(len(test_regions) % 128 == 0):
+            print(f"Len test_regions = {len(test_regions)}")
 plt.figure()
 
 # redraw, just the polygons
