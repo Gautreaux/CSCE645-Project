@@ -2,10 +2,11 @@
 from collections import defaultdict
 from typing import Counter
 import itertools
-from numpy import ceil, floor, int_
-import random
+from numpy import ceil, floor
+from shapely.geometry import Polygon, Point
 from stl import mesh, Mode
 from matplotlib import pyplot as plt
+from stl.base import X
 
 LASER_CUT_PART = "basebot.stl"
 NON_LASER_PART = "omniwheel.stl"
@@ -270,6 +271,7 @@ print(f"Total test points grid {test_points_qty_x}x{test_points_qty_y} = {test_p
 # step 1, build the quick collision check map
 max_r_sq = max_x + max_y
 
+# Not at all tested
 def isPointInSegDomain(point, seg):
     """
     Return True iff the point is on the segment, endpoint inclusive
@@ -295,6 +297,7 @@ def isPointInSegDomain(point, seg):
 
     return False
 
+# Not at all tested
 def isPointOnSegment(point, seg):
     """
     Return True iff
@@ -315,6 +318,7 @@ def isPointOnSegment(point, seg):
 
     return v1 == v2_neg
 
+# Not at all tested
 def getSegmentIntersection(seg_1, seg_2):
     """Return the point of intersection of the two segments if they interset, otherwise return None"""
     x1 = seg_1[0][0]
@@ -340,7 +344,7 @@ def getSegmentIntersection(seg_1, seg_2):
         return p
     return None
 
-
+# Not at all tested
 def isPointInside(point):
     """Return True iff this point is inside the polygon, or on the boundary"""
 
@@ -360,26 +364,26 @@ def isPointInside(point):
 test_regions = []
 test_has_intersection = []
 
-for i in range(len(test_points_x)-1):
-    for j in range(len(test_points_y)-1):
-        a = (test_points_x[i], test_points_y[j])
-        b = (test_points_x[i+1], test_points_y[j])
-        c = (test_points_x[i+1], test_points_y[j+1])
-        d = (test_points_x[i], test_points_y[j+1])
+# for i in range(len(test_points_x)-1):
+#     for j in range(len(test_points_y)-1):
+#         a = (test_points_x[i], test_points_y[j])
+#         b = (test_points_x[i+1], test_points_y[j])
+#         c = (test_points_x[i+1], test_points_y[j+1])
+#         d = (test_points_x[i], test_points_y[j+1])
 
-        this_has_intersection = 0
-        for p in [a,b,c,d]:
-            if isPointInside(p):
-                this_has_intersection = 1
-                break
+#         this_has_intersection = 0
+#         for p in [a,b,c,d]:
+#             if isPointInside(p):
+#                 this_has_intersection = 1
+#                 break
 
-        this_region = (a,b,c,d)
+#         this_region = (a,b,c,d)
 
-        test_regions.append(this_region)
-        test_has_intersection.append(this_has_intersection)
+#         test_regions.append(this_region)
+#         test_has_intersection.append(this_has_intersection)
 
-        if(len(test_regions) % 128 == 0):
-            print(f"Len test_regions = {len(test_regions)}")
+#         if(len(test_regions) % 128 == 0):
+#             print(f"Len test_regions = {len(test_regions)}")
 plt.figure()
 
 # redraw, just the polygons
@@ -415,5 +419,69 @@ for this_region, has_intersection in zip(test_regions, test_has_intersection):
 
 plt.axis('equal')
 
+# build the shapely object
+# reduce the polygon to 2d:
+old_all_polygons = all_polygons
+all_polygons = []
 
+min_x = 1000000000000
+max_x = 0
+min_y = 1000000000000
+max_x = 0
+
+for old_poly in old_all_polygons:
+    poly = []
+
+    for old_point in old_poly:
+        point = (old_point[0], old_point[2])
+        min_x = min(min_x, point[0])
+        min_y = min(min_y, point[1])
+        max_x = max(max_x, point[0])
+        max_y = max(max_y, point[1])
+
+        poly.append(point)
+    all_polygons.append(poly)
+
+
+all_bounding_box = ((min_x, min_y), (max_x, max_y))
+
+def getBoundingBox(poly):
+    min_x = min(map(lambda x: x[0], poly))
+    min_y = min(map(lambda x: x[1], poly))
+    max_x = max(map(lambda x: x[0], poly))
+    max_y = max(map(lambda x: x[1], poly))
+
+    return ((min_x, min_y), (max_x, max_y))
+
+# find the outside bounding polygon
+outer_poly = None
+outer_index = None
+for i, poly in enumerate(all_polygons):
+    if all_bounding_box == getBoundingBox(poly):
+        outer_poly = poly
+        outer_index = i
+        break
+
+assert(outer_poly is not None)
+
+interiors = [f for i,f in enumerate(all_polygons) if i != outer_index]
+
+poly_obj = Polygon(outer_poly, interiors)
+
+plt.figure()
+x,y = poly_obj.exterior.xy
+plt.plot(x,y, c="blue")
+
+for i in poly_obj.interiors:
+    x,y = i.xy
+    plt.plot(x,y, c="red")
+
+print(poly_obj.contains(Point(0,0)))
+print(poly_obj.intersects(Point(0,0)))
+print(poly_obj.contains(Point(1,1)))
+print(poly_obj.intersects(Point(1,1)))
+print(poly_obj.contains(Point(116.5,20.5)))
+print(poly_obj.intersects(Point(116.5, 20.5)))
+
+plt.axis('equal')
 plt.show()
