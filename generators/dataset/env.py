@@ -7,6 +7,9 @@ DUMP_DIRECTORY = "dump/"
 DUMP_LOCATION_SLDPRT = f"{DUMP_DIRECTORY}sldprt/"
 DUMP_LOCATION_STL = f"{DUMP_DIRECTORY}stl/"
 
+# precision to use in all round statements
+ROUND_PRECISION = 10
+
 _cwd = os.getcwd()
 _dir_list = [DUMP_DIRECTORY, DUMP_LOCATION_SLDPRT, DUMP_LOCATION_STL]
 
