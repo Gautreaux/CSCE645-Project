@@ -6,7 +6,7 @@ from typing import Callable, Iterable, Optional, Tuple, Union
 from generators.dataset.env import ROUND_PRECISION
 
 from generators.dataset.vector_utils import forcePositiveVector, vectorDot
-from generators.dataset.my_types import Edge, Point, PointSet, Vector, EdgeDict
+from generators.dataset.my_types import EDGE_SELECTOR_NONE, Edge, EdgeList, Point, PointSet, Vector, EdgeDict
 
 def loadSTLData(filepath: str):
     """Loads the file at filepath with stl library"""
@@ -150,3 +150,33 @@ def transformPoints(
     return (new_points, new_edges)
 
 
+def buildPointSetFromEdges(edges: Iterable[Edge]) -> PointSet:
+    """Builds the point set from the edges"""
+    ps = set()
+
+    for p1, p2 in edges:
+        ps.add(p1)
+        ps.add(p2)
+
+    return ps
+
+
+def doEdgeReduction(
+    edges: EdgeDict,
+    selector: Callable[[Point, Point, int], bool],
+) -> EdgeList:
+    """
+    Apply `selector` to all `edges`
+    @param selector
+        A callable that takes the end points of the edge and the number of times
+        the edge appears and returns a bool indicating if this edge should be kept
+
+        Default value picks exclusively the unique edges
+    Use buildPointSetFromEdges to get the new point set
+    """
+    el = []
+
+    for (p1, p2), v in edges.items():
+        if selector(p1, p2, v):
+            el.append((p1, p2))
+    return el
