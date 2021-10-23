@@ -3,12 +3,16 @@ from collections import defaultdict
 from typing import Counter
 import itertools
 from numpy import ceil, floor
-from shapely.geometry import Polygon, Point
+import numpy
+from shapely.geometry import Polygon, Point, mapping
 from stl import mesh, Mode
 from matplotlib import pyplot as plt
-from stl.base import X
+from matplotlib.transforms import Bbox
+import time
+from PIL import Image
+import json
 
-LASER_CUT_PART = "basebot.stl"
+LASER_CUT_PART = "botblocker2.stl"
 NON_LASER_PART = "omniwheel.stl"
 
 IDEAL_NORMAL = (0, 1, 0)
@@ -240,27 +244,28 @@ plt.axis('equal')
 # now, attempt to create a mask for this item
 MASK_RESOLUTION_IN = 0.1
 MASK_RESOLUTION_MM = MASK_RESOLUTION_IN * 25.4
+MASK_RESOLUTION_ACTUAL = MASK_RESOLUTION_IN
 
 min_x = min(map(lambda x: x[0], relevant_points))
 max_x = max(map(lambda x: x[0], relevant_points))
 min_y = min(map(lambda x: x[2], relevant_points))
 max_y = max(map(lambda x: x[2], relevant_points))
 
-min_test_point_x = round(floor(min_x / MASK_RESOLUTION_MM) * MASK_RESOLUTION_MM, 6)
-max_test_point_x = round(ceil(max_x / MASK_RESOLUTION_MM) * MASK_RESOLUTION_MM, 6)
-min_test_point_y = round(floor(min_y / MASK_RESOLUTION_MM) * MASK_RESOLUTION_MM, 6)
-max_test_point_y = round(ceil(max_y / MASK_RESOLUTION_MM) * MASK_RESOLUTION_MM, 6)
+min_test_point_x = round(floor(min_x / MASK_RESOLUTION_ACTUAL) * MASK_RESOLUTION_ACTUAL, 6)
+max_test_point_x = round(ceil(max_x / MASK_RESOLUTION_ACTUAL) * MASK_RESOLUTION_ACTUAL, 6)
+min_test_point_y = round(floor(min_y / MASK_RESOLUTION_ACTUAL) * MASK_RESOLUTION_ACTUAL, 6)
+max_test_point_y = round(ceil(max_y / MASK_RESOLUTION_ACTUAL) * MASK_RESOLUTION_ACTUAL, 6)
 
 print(f"Bonding box: ({min_x}, {min_y}) ({max_x}, {max_y})")
 print(f"Test box: ({min_test_point_x}, {min_test_point_y}) ({max_test_point_x}, {max_test_point_y})")
 
 test_points_x = [min_test_point_x]
 while test_points_x[-1] < max_test_point_x:
-    test_points_x.append(round(test_points_x[-1] + MASK_RESOLUTION_MM, 6))
+    test_points_x.append(round(test_points_x[-1] + MASK_RESOLUTION_ACTUAL, 6))
 
 test_points_y = [min_test_point_y]
 while test_points_y[-1] < max_test_point_y:
-    test_points_y.append(round(test_points_y[-1] + MASK_RESOLUTION_MM, 6))
+    test_points_y.append(round(test_points_y[-1] + MASK_RESOLUTION_ACTUAL, 6))
 
 test_points_qty_x = round(len(test_points_x))
 test_points_qty_y = round(len(test_points_y))
@@ -476,12 +481,99 @@ for i in poly_obj.interiors:
     x,y = i.xy
     plt.plot(x,y, c="red")
 
-print(poly_obj.contains(Point(0,0)))
-print(poly_obj.intersects(Point(0,0)))
-print(poly_obj.contains(Point(1,1)))
-print(poly_obj.intersects(Point(1,1)))
-print(poly_obj.contains(Point(116.5,20.5)))
-print(poly_obj.intersects(Point(116.5, 20.5)))
+print("starting collsion check.")
+start_time = time.time()
+
+test_regions = []
+test_has_intersection = []
+test_region_ids = []
+for i in range(len(test_points_x)-1):
+    for j in range(len(test_points_y)-1):
+        a = (test_points_x[i], test_points_y[j])
+        b = (test_points_x[i+1], test_points_y[j])
+        c = (test_points_x[i+1], test_points_y[j+1])
+        d = (test_points_x[i], test_points_y[j+1])
+
+        this_region = (a,b,c,d)
+
+        this_has_intersection = 0
+        for p in this_region:
+            if poly_obj.intersects(Point(p[0], p[1])):
+                this_has_intersection = 1
+                break
+
+        test_regions.append(this_region)
+        test_has_intersection.append(this_has_intersection)
+        test_region_ids.append((i,j))
+
+print(f"Done computing collisions (took {round(time.time() - start_time, 2)}s), drawing. This will take some time")
+plt.scatter(x_coords, y_coords, s=[0.25]*len(y_coords))
+for this_region, has_intersection in zip(test_regions, test_has_intersection):
+    x_coords = list(map(lambda x: x[0], this_region))
+    y_coords = list(map(lambda x: x[1], this_region))
+    c = c_good if has_intersection == 0 else c_bad
+
+    plt.fill(x_coords, y_coords, facecolor=c)
+
+
+# print(poly_obj.contains(Point(0,0)))
+# print(poly_obj.intersects(Point(0,0)))
+# print(poly_obj.contains(Point(1,1)))
+# print(poly_obj.intersects(Point(1,1)))
+# print(poly_obj.contains(Point(116.5,20.5)))
+# print(poly_obj.intersects(Point(116.5, 20.5)))
 
 plt.axis('equal')
+
+# render the collision mask to an image
+pil_img = Image.new("RGB", (test_points_qty_x-1, test_points_qty_y-1))
+
+pixels = pil_img.load()
+
+for (i,j),c in zip(test_region_ids, test_has_intersection):
+    pixels[i,j] = (0,0,0) if c else (255, 255, 255)
+
+# because y up vs y down coordinate systems
+pil_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
+pil_img.save("image_pil.png", "PNG")
+
+# do some mat plot lib tom-fuckery
+plt.figure()
+plt.imshow(numpy.array(pil_img), interpolation="nearest")
+plt.title("From explicit collision checking")
+
+
+f = plt.figure(dpi=10, figsize=(max_test_point_x - min_test_point_x, max_test_point_y - min_test_point_y))
+
+x,y = poly_obj.exterior.xy
+plt.fill(x,y, facecolor="blue", linewidth=None, aa=False, fill=True)
+
+# TODO - big: if we can render the polygon to an image
+#   this is an extremely efficient way for collisions checking
+# unfortunately, mat-plot adds some padding around the figure
+plt.axis("off")
+a = plt.gca()
+a.set_aspect("equal", adjustable="datalim")
+# plt.xlim(min_test_point_x, max_test_point_x)
+# plt.ylim(min_test_point_y, max_test_point_y)
+# print(a.get_xlim())
+# print(a.get_ylim())
+plt.savefig("no_axis.png", format="png", bbox_inches=Bbox(((-2.4, -0.7), (0.7, 1.9))), pad_inches=0.0, dpi=10)
+
+plt.savefig("no_axis.svg", format="svg", bbox_inches=Bbox(((-2.4, -0.7), (0.7, 1.9))), pad_inches=0.0, dpi=10)
+
+no_axis_out = Image.open("no_axis.png")
+w,h = no_axis_out.size
+
+baseline = Image.open("image_pil.png")
+w_b, h_b = baseline.size
+
+print(f"Size {w}x{h}. Expected {w_b}x{h_b}")
+
+
+m = mapping(poly_obj)
+print(m)
+with open("geojson.json", 'w') as f:
+    json.dump(m, f)
 plt.show()
+assert((w,h) == (w_b,h_b))
