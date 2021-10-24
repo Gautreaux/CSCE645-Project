@@ -1,9 +1,11 @@
 
 from math import floor, ceil
-from numpy import flipud
+from numpy import flipud, uint8
+import numpy
 from rasterio.features import rasterize
 from shapely import affinity
 from shapely.geometry import mapping as ShapelyToGeoJSON
+import struct
 from typing import Any, Tuple
 
 from generators.dataset.env import ROUND_PRECISION
@@ -109,3 +111,75 @@ def constructRasterFromPolygon(
     f = rasterize([ShapelyToGeoJSON(polygon)], fill=0, out_shape=(b,a), all_touched=True)
 
     return f
+
+
+def compressRasterFormat(raster) -> Any:
+    """Compresses the raster fromat by using int8 cells in the rows"""
+    
+    new_raster = []
+
+    for row in raster:
+        this_row = []
+
+        for i, v in enumerate(row):
+            m = i % 8
+            if m == 0:
+                this_row.append(0)
+            this_row[-1] = this_row[-1] | (v << m)
+
+        new_raster.append(this_row)
+    return numpy.array(new_raster)
+
+
+def expandRasterFormat(raster) -> Any:
+    """Expand the raster format from bits to 1,0 array"""
+
+    new_raster = numpy.zeros((len(raster), len(raster[0])*8), dtype=uint8)
+
+    for i, row in enumerate(raster):
+        for j,v in enumerate(row):
+            for o in range(8):
+                new_raster[i][j*8+o] = (1 if (v & (1<<o)) else 0)
+        
+    while sum(new_raster[:, -1]) == 0:
+        new_raster = new_raster[:, :-1]
+    
+    return new_raster
+
+
+def exportRasterToFile(raster, filePath: str, pre_compressed: bool=False) -> None:
+    """Exports a raster to a given filepath"""
+
+    if not pre_compressed:
+        raster = compressRasterFormat(raster)
+
+    num_rows, num_bytes_per_row = raster.shape
+
+    with open(filePath, 'wb') as outfile:
+        outfile.write(struct.pack(">I", num_rows))
+        outfile.write(struct.pack(">I", num_bytes_per_row))
+
+        for cell in numpy.nditer(raster):
+            outfile.write(struct.pack("B", cell))
+
+
+def importRasterFromFile(filePath: str, decompress: bool = False) -> Any:
+    
+    with open(filePath, 'rb') as infile:
+        buffer = infile.read()
+
+    (num_rows, ) = struct.unpack_from(">I", buffer)
+    (num_bytes_per_row, ) = struct.unpack_from(">I", buffer, offset=4)
+
+    a = numpy.zeros(num_rows * num_bytes_per_row, dtype=uint8)
+
+    for i in range(num_rows * num_bytes_per_row):
+        a[i] = (struct.unpack_from("B", buffer, 8 + i))[0]
+
+    a = a.reshape((num_rows, num_bytes_per_row))
+
+
+    if decompress:
+        return expandRasterFormat(a)
+    else:
+        return a

@@ -3,7 +3,7 @@ import time
 from generators.dataset.env import RASTER_RESOLUTION_LOW, RASTER_RESOLUTION_ULTRA
 from generators.dataset.my_types import EDGE_SELECTOR_UNIQUE, TRANSFORM_KEEP_XZ
 from generators.dataset.polygon_utils import buildPolygonFromEdges
-from generators.dataset.raster_utils import calculateRasterBounds, constructRasterFromPolygon, rasterAlignPolygon
+from generators.dataset.raster_utils import calculateRasterBounds, compressRasterFormat, constructRasterFromPolygon, expandRasterFormat, exportRasterToFile, importRasterFromFile, rasterAlignPolygon
 from generators.dataset.render_utils import drawPolygonOnRaster, plotPointEdge2D, plotPolygon
 from generators.dataset.stl_utils import buildPointSetFromEdges, determineIfLaserNormal, doEdgeReduction, loadSTLData, projectPointsEdgesOntoPlane, transformPoints
 
@@ -49,6 +49,16 @@ end_time = time.time()
 # print(calculateRasterBounds(sh_poly, RASTER_RESOLUTION_LOW))
 # print(raster_poly.bounds)
 # print(raster_out.shape)
+
+r = compressRasterFormat(raster_out)
+r_x = expandRasterFormat(r)
+
+exportRasterToFile(raster_out, "tmp.rasterout")
+r_in = importRasterFromFile("tmp.rasterout")
+
+assert((raster_out == r_x).all())
+assert((r_in == r).all())
+assert((expandRasterFormat(r_in) == raster_out).all())
 
 drawPolygonOnRaster(raster_out, raster_poly, "Poly+Raster", True)
 

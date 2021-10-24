@@ -9,3 +9,6 @@ temp.md
 generators/dataset/dump/**
 
 **.ipt
+**.sldprt
+
+**/adhoc/MarbleSorter/**
