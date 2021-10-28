@@ -6,7 +6,7 @@ from rasterio.features import rasterize
 from shapely import affinity
 from shapely.geometry import mapping as ShapelyToGeoJSON
 import struct
-from typing import Any, Tuple
+from typing import Any, Tuple, Optional
 
 from generators.dataset.env import ROUND_PRECISION
 from generators.dataset.my_types import ShapelyPolygon
@@ -162,7 +162,6 @@ def exportRasterToFile(raster, filePath: str, pre_compressed: bool=False) -> Non
         for cell in numpy.nditer(raster):
             outfile.write(struct.pack("B", cell))
 
-
 def importRasterFromFile(filePath: str, decompress: bool = False) -> Any:
     
     with open(filePath, 'rb') as infile:
@@ -183,3 +182,43 @@ def importRasterFromFile(filePath: str, decompress: bool = False) -> Any:
         return expandRasterFormat(a)
     else:
         return a
+
+
+def exportRasterToPlaintext(raster, filePath: Optional[str] = None) -> str:
+    """
+    Export the raster to a plaintext string, optionally saving to a file
+    Will not compress
+    """
+
+    s = []
+    num_rows, num_columns = raster.shape
+    s.append(f"{num_rows} {num_columns}")
+
+    for row in raster:
+        t = []
+        for cell in row:
+            t.append("1" if cell else "0")
+        s.append("".join(t))
+    s = "\n".join(s)
+
+    if filePath:
+        with open(filePath, 'w') as out_file:
+            out_file.write(s)
+    return s
+
+
+def importRasterFromPlaintext(filePath: str) -> Any:
+    """Import a raster from a plaintext file"""
+
+    with open(filePath, 'r') as in_file:
+        i = iter(in_file)
+        h = next(i)
+        num_rows, num_cols = list(map(int, h.split()))
+
+        r = numpy.zeros((num_rows, num_cols))
+
+        for j,row in enumerate(i):
+            for k,cell in enumerate(row.strip()):
+                r[j, k] = (1 if cell == "1" else 0)
+
+        return r
