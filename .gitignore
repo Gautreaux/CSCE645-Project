@@ -12,3 +12,5 @@ py/dataset/dump/**
 **.sldprt
 
 **/adhoc/MarbleSorter/**
+
+CPP/OFiles/**
