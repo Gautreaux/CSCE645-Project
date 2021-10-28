@@ -8,8 +8,8 @@ from shapely.geometry import mapping as ShapelyToGeoJSON
 import struct
 from typing import Any, Tuple, Optional
 
-from generators.dataset.env import ROUND_PRECISION
-from generators.dataset.my_types import ShapelyPolygon
+from py.dataset.env import ROUND_PRECISION
+from py.dataset.my_types import ShapelyPolygon
 
 
 

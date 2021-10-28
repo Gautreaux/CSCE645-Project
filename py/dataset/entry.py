@@ -1,11 +1,11 @@
 import time
 from typing import Any, Tuple
 
-from generators.dataset.env import RASTER_RESOLUTION_HIGH
-from generators.dataset.my_types import EDGE_SELECTOR_UNIQUE, TRANSFORM_KEEP_XZ
-from generators.dataset.polygon_utils import buildPolygonFromEdges
-from generators.dataset.raster_utils import rasterAlignPolygon, constructRasterFromPolygon
-from generators.dataset.stl_utils import buildPointSetFromEdges, determineIfLaserNormal, doEdgeReduction, loadSTLData, projectPointsEdgesOntoPlane, transformPoints
+from py.dataset.env import RASTER_RESOLUTION_HIGH
+from py.dataset.my_types import EDGE_SELECTOR_UNIQUE, TRANSFORM_KEEP_XZ
+from py.dataset.polygon_utils import buildPolygonFromEdges
+from py.dataset.raster_utils import rasterAlignPolygon, constructRasterFromPolygon
+from py.dataset.stl_utils import buildPointSetFromEdges, determineIfLaserNormal, doEdgeReduction, loadSTLData, projectPointsEdgesOntoPlane, transformPoints
 
 
 def preprocessFile(filePath: str, resolution: int = RASTER_RESOLUTION_HIGH) -> Tuple[Any, Any]:

@@ -1,11 +1,11 @@
 import time
 
-from generators.dataset.env import RASTER_RESOLUTION_LOW, RASTER_RESOLUTION_ULTRA
-from generators.dataset.my_types import EDGE_SELECTOR_UNIQUE, TRANSFORM_KEEP_XZ
-from generators.dataset.polygon_utils import buildPolygonFromEdges
-from generators.dataset.raster_utils import calculateRasterBounds, compressRasterFormat, constructRasterFromPolygon, expandRasterFormat, exportRasterToFile, importRasterFromFile, rasterAlignPolygon
-from generators.dataset.render_utils import drawPolygonOnRaster, plotPointEdge2D, plotPolygon
-from generators.dataset.stl_utils import buildPointSetFromEdges, determineIfLaserNormal, doEdgeReduction, loadSTLData, projectPointsEdgesOntoPlane, transformPoints
+from py.dataset.env import RASTER_RESOLUTION_LOW, RASTER_RESOLUTION_ULTRA
+from py.dataset.my_types import EDGE_SELECTOR_UNIQUE, TRANSFORM_KEEP_XZ
+from py.dataset.polygon_utils import buildPolygonFromEdges
+from py.dataset.raster_utils import calculateRasterBounds, compressRasterFormat, constructRasterFromPolygon, expandRasterFormat, exportRasterToFile, importRasterFromFile, rasterAlignPolygon
+from py.dataset.render_utils import drawPolygonOnRaster, plotPointEdge2D, plotPolygon
+from py.dataset.stl_utils import buildPointSetFromEdges, determineIfLaserNormal, doEdgeReduction, loadSTLData, projectPointsEdgesOntoPlane, transformPoints
 
 
 FILE_PATH = "adhoc/basebot.stl"

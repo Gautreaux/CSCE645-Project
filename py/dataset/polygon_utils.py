@@ -2,7 +2,7 @@ from collections import defaultdict
 from typing import Iterable
 
 
-from generators.dataset.my_types import Edge, ShapelyPolygon, ShapelyPoint
+from py.dataset.my_types import Edge, ShapelyPolygon, ShapelyPoint
 
 
 def buildPolygonFromEdges(edges: Iterable[Edge]) -> ShapelyPolygon:

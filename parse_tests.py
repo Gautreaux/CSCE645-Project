@@ -3,9 +3,9 @@ import shutil
 import time
 import svgpathtools
 
-from generators.dataset.entry import preprocessFile
-from generators.dataset.env import RASTER_RESOLUTION_HIGH
-from generators.dataset.raster_utils import exportRasterToPlaintext
+from py.dataset.entry import preprocessFile
+from py.dataset.env import RASTER_RESOLUTION_HIGH
+from py.dataset.raster_utils import exportRasterToPlaintext
 
 FILE_DIR = "adhoc/MarbleSorter/STL"
 OUT_DIR = "adhoc/MarbleSorter/Raster"

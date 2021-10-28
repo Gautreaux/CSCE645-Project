@@ -6,7 +6,7 @@ temp.md
 /adhoc/CGAL-5.3
 
 **/__pycache__/**
-generators/dataset/dump/**
+py/dataset/dump/**
 
 **.ipt
 **.sldprt

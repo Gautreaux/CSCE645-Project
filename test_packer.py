@@ -2,9 +2,9 @@ import os
 import cv2
 import numpy
 from PIL import Image
-from generators.dataset.env import RASTER_RESOLUTION_HIGH
+from py.dataset.env import RASTER_RESOLUTION_HIGH
 
-from generators.dataset.raster_utils import importRasterFromPlaintext
+from py.dataset.raster_utils import importRasterFromPlaintext
 
 
 

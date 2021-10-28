@@ -3,7 +3,7 @@
 from matplotlib import pyplot as plt
 from typing import Optional
 
-from generators.dataset.my_types import EdgeDict, PointSet, ShapelyPolygon
+from py.dataset.my_types import EdgeDict, PointSet, ShapelyPolygon
 
 from shapely import affinity
 

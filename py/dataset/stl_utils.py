@@ -3,10 +3,10 @@
 from collections import defaultdict
 from stl import mesh, Mode
 from typing import Callable, Iterable, Optional, Tuple, Union
-from generators.dataset.env import ROUND_PRECISION
+from py.dataset.env import ROUND_PRECISION
 
-from generators.dataset.vector_utils import forcePositiveVector, vectorDot
-from generators.dataset.my_types import EDGE_SELECTOR_NONE, Edge, EdgeList, Point, PointSet, Vector, EdgeDict
+from py.dataset.vector_utils import forcePositiveVector, vectorDot
+from py.dataset.my_types import EDGE_SELECTOR_NONE, Edge, EdgeList, Point, PointSet, Vector, EdgeDict
 
 def loadSTLData(filepath: str):
     """Loads the file at filepath with stl library"""

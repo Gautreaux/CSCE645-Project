@@ -1,8 +1,8 @@
 
 
-from generators.dataset.env import ROUND_PRECISION
+from py.dataset.env import ROUND_PRECISION
 
-from generators.dataset.my_types import Vector
+from py.dataset.my_types import Vector
 
 
 def forcePositiveVector(v: Vector) -> Vector:
