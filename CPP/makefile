@@ -29,4 +29,4 @@ debug : clean
 
 # rules for creating o files
 OFiles/Raster.o : Raster.cpp Raster.hpp
-	$(CC_COMPLIE_NO_LINK_AUTO)
+	$(CC_COMPLIE_NO_LINK_AUTO) -Wno-class-memaccess
