@@ -184,7 +184,7 @@ def importRasterFromFile(filePath: str, decompress: bool = False) -> Any:
         return a
 
 
-def exportRasterToPlaintext(raster, filePath: Optional[str] = None) -> str:
+def exportRasterToPlaintext(raster, filePath: Optional[str] = None, resolution: Optional[int] = None) -> str:
     """
     Export the raster to a plaintext string, optionally saving to a file
     Will not compress
@@ -193,6 +193,9 @@ def exportRasterToPlaintext(raster, filePath: Optional[str] = None) -> str:
     s = []
     num_rows, num_columns = raster.shape
     s.append(f"{num_rows} {num_columns}")
+
+    if resolution:
+        s[-1] = s[-1] + f" {resolution}"
 
     for row in raster:
         t = []
@@ -213,7 +216,11 @@ def importRasterFromPlaintext(filePath: str) -> Any:
     with open(filePath, 'r') as in_file:
         i = iter(in_file)
         h = next(i)
-        num_rows, num_cols = list(map(int, h.split()))
+
+        try:
+            num_rows, num_cols = list(map(int, h.split()))
+        except ValueError:
+            num_rows, num_cols, resolution = list(map(int, h.split()))
 
         r = numpy.zeros((num_rows, num_cols))
 

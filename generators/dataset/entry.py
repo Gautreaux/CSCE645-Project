@@ -8,7 +8,7 @@ from generators.dataset.raster_utils import rasterAlignPolygon, constructRasterF
 from generators.dataset.stl_utils import buildPointSetFromEdges, determineIfLaserNormal, doEdgeReduction, loadSTLData, projectPointsEdgesOntoPlane, transformPoints
 
 
-def preprocessFile(filePath: str) -> Tuple[Any, Any]:
+def preprocessFile(filePath: str, resolution: int = RASTER_RESOLUTION_HIGH) -> Tuple[Any, Any]:
     """
     Preprocess the file specified by filepath 
     return a tuple of Polygon and Rasterized result
@@ -43,8 +43,8 @@ def preprocessFile(filePath: str) -> Tuple[Any, Any]:
 
     sh_poly = buildPolygonFromEdges(ed)
 
-    raster_poly = rasterAlignPolygon(sh_poly, RASTER_RESOLUTION_HIGH)
-    raster_out = constructRasterFromPolygon(raster_poly, RASTER_RESOLUTION_HIGH, pre_scaled=True)
+    raster_poly = rasterAlignPolygon(sh_poly, resolution)
+    raster_out = constructRasterFromPolygon(raster_poly, resolution, pre_scaled=True)
 
     end_time = time.time()
 

@@ -32,6 +32,7 @@ for r in raster_list:
     threshold = 1
     loc = numpy.where(res >= threshold)
 
+    # this is not working
     if loc:
         # there is a point to put this one in
         print(len(loc))
