@@ -2,9 +2,11 @@ import os
 import shutil
 import time
 import svgpathtools
+import json
+import shapely
 
 from py.dataset.entry import preprocessFile
-from py.dataset.env import RASTER_RESOLUTION_HIGH
+from py.dataset.env import RASTER_RESOLUTION_I24_T128_FIT
 from py.dataset.raster_utils import exportRasterToPlaintext
 
 FILE_DIR = "adhoc/MarbleSorter/STL"
@@ -23,7 +25,7 @@ for f in os.listdir(FILE_DIR):
     total += 1
 
     try:
-        p, r = preprocessFile(f"{FILE_DIR}/{f}", resolution=RASTER_RESOLUTION_HIGH)
+        p, r = preprocessFile(f"{FILE_DIR}/{f}", resolution=RASTER_RESOLUTION_I24_T128_FIT)
     except NotImplementedError:
         continue
 
@@ -32,7 +34,10 @@ for f in os.listdir(FILE_DIR):
     fp = f"{OUT_DIR}/{n}.raster"
 
     with open(fp, 'w') as out_file:
-        exportRasterToPlaintext(r, fp, resolution=RASTER_RESOLUTION_HIGH)
+        exportRasterToPlaintext(r, fp, resolution=RASTER_RESOLUTION_I24_T128_FIT)
+
+    with open(f"{OUT_DIR}/{n}.geojson", 'w') as out_file:
+        out_file.write(json.dumps(shapely.geometry.mapping(p)))
 
     svg_path = f"{OUT_DIR}/{n}.svg"
 
