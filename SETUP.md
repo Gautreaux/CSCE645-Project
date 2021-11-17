@@ -53,3 +53,8 @@ sudo make
 ## Python
 
 Python three should be installed. Developed on python 3.8 so that or later should work.
+
+`sudo apt install python3-pip`
+`pip3 install opencv-python`
+`pip3 install shapely`
+`pip3 install rasterio` _more complicated on windows_

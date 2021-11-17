@@ -1,6 +1,7 @@
 CXX:=nvcc# which compiler to use
 
-CPP_COMP_COM=$(CXX) 
+CPP_FLAGS=
+CPP_COMP_COM=$(CXX) $(CPP_FLAGS)
 CC_COMPLIE_NO_LINK_AUTO=$(CPP_COMP_COM) -c -o $@ $<
 CC_COMPILE_LINK_EXE_AUTO=$(CPP_COMP_COM) -o $@ $< OFiles/*.o
 

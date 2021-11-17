@@ -16,7 +16,10 @@ protected:
     PosType height; // exact height, round up to next multiple 32
     uint32_t* data;
 public:
+    Raster(void);
     Raster(const PosType w, const PosType h);
+    Raster(const Raster& r);
+    Raster(Raster&& r);
     ~Raster(void);
 
     // return the size of the raster: x*y

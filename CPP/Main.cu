@@ -105,6 +105,8 @@ __global__ void devicePack_entry(
 // host entry for the pack function
 void hostPack_entry(const std::vector<Raster>& to_pack){
     std::cout << "Beginning Packing Prep" << std::endl;
+    // may need to unpack into one function and synchronize
+    //  if wierd behavior is observed
     const auto raster_buffer = packPrep(to_pack);
     const auto sheet_buffer = sheetPrep();
     const auto output_buffer = outputPrep(to_pack.size());
@@ -172,16 +174,16 @@ int main(const int argc, const char * const * const argv){
 
     std::vector<std::string> filepaths_vector = {
         "../SampleRasters/basebot.raster",
-        "../SampleRasters/botblocker.raster",
-        "../SampleRasters/botblocker2.raster",
-        "../SampleRasters/laserCutEndcap_base.raster",
+        "../SampleRasters/blocker.raster",
+        "../SampleRasters/Part7.raster",
         "../SampleRasters/vert1.raster",
+        "../SampleRasters/vert2.raster",
         };
 
     std::vector<Raster> r_vector;
 
     for (const auto& fp : filepaths_vector){
-        r_vector.push_back(readRaster(fp));
+        r_vector.emplace_back(readRaster(fp));
     }
 
     hostPack_entry(r_vector);
