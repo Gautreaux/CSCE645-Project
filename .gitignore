@@ -15,3 +15,7 @@ py/dataset/dump/**
 
 CPP/OFiles/**
 CPP/Main
+
+CPP/Tests/endian
+
+SampleRasters/*
