@@ -1,7 +1,7 @@
 #pragma once
 
 #include "pch.h"
-#include "Raster.cuh"
+#include "Raster.hpp"
 
 #include <fstream>
 #include <string>

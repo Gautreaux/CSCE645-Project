@@ -1,7 +1,9 @@
 #pragma once
 #include "pch.h"
 
-#include "Raster.cuh"
+// TODO - this will not use raster in the future
+//  raster is now cpu only
+#include "Raster.hpp"
 
 
 // bake the part raster into the space raster at postition p

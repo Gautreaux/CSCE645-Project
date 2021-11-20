@@ -2,8 +2,8 @@
 
 #include <iostream>
 
-#include "Raster.cuh"
 #include "Packer.cuh"
+#include "Raster.hpp"
 #include "RasterUtils.hpp"
 
 #include <vector>
@@ -109,7 +109,6 @@ __global__ void devicePack_entry(
         int16_t height = (raster_buffer[0] & 0xFFFF0000) >> 16;
         
         int16_t n_rounds_horz = SHEET_WIDTH_CELLS;
-        int16_t
     }
 }
 

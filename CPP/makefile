@@ -24,7 +24,7 @@ run:
 	./$(EXECUTABLE)
 
 # rules for creating o files
-OFiles/Raster.o : Raster.cu Raster.cuh pch.h
+OFiles/Raster.o : Raster.cpp Raster.hpp pch.h
 	$(CC_COMPLIE_NO_LINK_AUTO)
 
 OFiles/RasterUtils.o : RasterUtils.cpp RasterUtils.hpp pch.h
