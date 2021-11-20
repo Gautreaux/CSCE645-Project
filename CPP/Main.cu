@@ -45,7 +45,8 @@ int32_t* packPrep(const std::vector<Raster>& v){
     // TODO - proper error checking on CUDA calls
     cudaMalloc(&device_buffer, mem_required*sizeof(int32_t));
     cudaMemcpy(device_buffer, host_buffer, sizeof(int32_t)*mem_required, cudaMemcpyHostToDevice);
-    
+    cudaDeviceSynchronize();
+
     free(host_buffer);
 
     return device_buffer;
@@ -63,6 +64,7 @@ int32_t* sheetPrep(void){
 
     //TODO - proper error checking on CUDA call
     cudaMalloc(&device_buffer, n_bytes);
+    cudaDeviceSynchronize();
 
     return device_buffer;
 }
@@ -76,6 +78,7 @@ int32_t* outputPrep(const size_t number_items){
     //TODO - proper error checking on CUDA call
     cudaMalloc(&device_buffer, n_bytes);
     cudaMemset(device_buffer, 0, n_bytes);
+    cudaDeviceSynchronize();
 
     return device_buffer;
 }
@@ -90,16 +93,24 @@ void cleanupDevice(
     cudaFree(raster_buffer);
     cudaFree(sheet_buffer);
     cudaFree(output_buffer);
+    cudaDeviceSynchronize();
 }
 
 // device entry for pack function
 //  placeholder, will be removed eventually
 __global__ void devicePack_entry(
-    int32_t *const raster_buffer,
+    int32_t * raster_buffer,
     int32_t *const sheet_buffer,
-    int32_t *const output_buffer)
+    int32_t * output_buffer)
 {
-    //TODO
+    while(*raster_buffer != 0){
+        // this loop packs a single element
+        int16_t width = raster_buffer[0] & (0x0000FFFF);
+        int16_t height = (raster_buffer[0] & 0xFFFF0000) >> 16;
+        
+        int16_t n_rounds_horz = SHEET_WIDTH_CELLS;
+        int16_t
+    }
 }
 
 // host entry for the pack function
@@ -113,6 +124,7 @@ void hostPack_entry(const std::vector<Raster>& to_pack){
 
     std::cout << "Beginning Pack Kernel" << std::endl;
     // TODO - invoke kernel
+    cudaDeviceSynchronize();
 
     std::cout << "Ended Pack Kernel" << std::endl;
     cleanupDevice(raster_buffer, sheet_buffer, output_buffer);
