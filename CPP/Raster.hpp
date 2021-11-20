@@ -29,6 +29,9 @@ public:
         inline uint32_t& operator[](const int index){
             return data[index];
         }
+        inline const uint32_t& operator[](const int index) const {
+            return data[index];
+        }
     };
 protected:
     PosType width;
@@ -55,10 +58,10 @@ public:
     inline PosType getHeight(void) const {return height;}
 
     inline RasterRow& operator[](const int index){
-        return data[index];
+        return data[index >> 5]; // div by 32 to get proper height
     }
 
     inline const RasterRow& operator[](const int index) const {
-        return data[index];
+        return data[index >> 5]; // div by 32 to get proper height
     }
 };

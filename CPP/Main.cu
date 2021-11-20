@@ -2,12 +2,14 @@
 
 #include <iostream>
 
+#include "env.hpp"
 #include "Packer.cuh"
 #include "Raster.hpp"
 #include "RasterUtils.hpp"
 
 #include <vector>
 
+// TODO - remove
 #define SHEET_HEIGHT_U32_CELLS 128
 #define SHEET_WIDTH_CELLS (48*170)
 
@@ -163,6 +165,36 @@ void displayCUDAdeviceStats(void){
     }
 }
 
+void hostPack_entry_cpu(const std::vector<Raster>& to_pack){
+    Raster space(SHEET_WIDTH_INCH*SAMPLES_PER_INCH, SHEET_HEIGHT_INCH*SAMPLES_PER_INCH);
+
+    for(unsigned int i =0; i < to_pack.size(); i++){
+        const Raster& this_part = to_pack[i];
+
+        std::cout << "S";
+        std::flush(std::cout);
+
+        const Raster& possible_locations = buildPackMap_cpu(space, this_part);
+
+        std::cout << ".M";
+        std::flush(std::cout);
+
+        PosType x_place, y_place;
+        uint8_t y_out_offset;
+
+        pickBestPosition_cpu(possible_locations, x_place, y_place, y_out_offset);
+        std::cout << ".P-";
+        std::flush(std::cout);
+        bakeRaster_cpu(this_part, space, x_place, y_place, y_out_offset);
+        std::cout << ".DONE  ";
+        std::flush(std::cout);
+
+        std::cout << "Packer placed raster." << i << " at " << x_place 
+            << " " << y_place << "+" << y_out_offset << std::endl;
+
+    }
+}
+
 int main(const int argc, const char * const * const argv){
     // TODO - endianness checks on entry
 
@@ -197,6 +229,10 @@ int main(const int argc, const char * const * const argv){
         r_vector.emplace_back(readRaster(fp));
     }
 
-    hostPack_entry(r_vector);
+    std::cout << "Loaded test rasters, startingpack." << std::endl;
+
+    // hostPack_entry(r_vector);
+    hostPack_entry_cpu(r_vector);
+    
 
 }

@@ -1,0 +1,5 @@
+
+#define SAMPLES_PER_INCH 170
+
+#define SHEET_HEIGHT_INCH 24
+#define SHEET_WIDTH_INCH 48

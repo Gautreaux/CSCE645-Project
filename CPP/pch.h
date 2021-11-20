@@ -7,3 +7,9 @@
 #else
 #define NVCC_HD
 #endif
+
+// (x % 32)
+#define FAST_MOD_32(x) (x & 0b11111)
+
+// ceil(x/32)
+#define CEIL_DIV_32(x) ((x >> 5) + (FAST_MOD_32(x) ? 1 : 0)) 

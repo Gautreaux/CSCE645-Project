@@ -5,7 +5,9 @@
 Raster::RasterRow::RasterRow(void): data(nullptr), width(0) {}
 
 Raster::RasterRow::RasterRow(const PosType w): 
-data(new uint32_t[w]), width(w){}
+data(new uint32_t[w]), width(w){
+    memset(this->data, 0, sizeof(uint32_t)*width);
+}
 
 Raster::RasterRow::RasterRow(const RasterRow& r):
 data(new uint32_t[r.width]), width(r.width){
@@ -50,16 +52,16 @@ Raster::RasterRow::~RasterRow(void){
 Raster::Raster(void): width(0), height(0), data(nullptr){};
 
 Raster::Raster(const PosType w, const PosType h): 
-width(w), height(h), data(new RasterRow[h])
+width(w), height(h), data(new RasterRow[CEIL_DIV_32(h)])
 {
-    for(unsigned int i = 0; i < h; i++){
+    for(unsigned int i = 0; i < CEIL_DIV_32(h); i++){
         data[i] = std::move(RasterRow(w));
     }
 };
 
 Raster::Raster(const Raster& r): 
-width(r.width), height(r.height), data(new RasterRow[r.height]){
-    for(unsigned int i = 0; i < r.height; i++){
+width(r.width), height(r.height), data(new RasterRow[CEIL_DIV_32(r.height)]){
+    for(unsigned int i = 0; i < CEIL_DIV_32(r.height); i++){
         data[i] = r[i];
     }
 }

@@ -7,7 +7,7 @@ CC_COMPILE_LINK_EXE_AUTO=$(CPP_COMP_COM) -o $@ $< OFiles/*.o
 
 EXECUTABLE=Main
 
-$(EXECUTABLE) : Main.cu OFiles/Packer.o pch.h OFiles/RasterUtils.o
+$(EXECUTABLE) : Main.cu OFiles/Packer.o pch.h env.hpp OFiles/RasterUtils.o
 	$(CC_COMPILE_LINK_EXE_AUTO)
 
 .PHONY: $(EXECUTABLE) tests clean force run
