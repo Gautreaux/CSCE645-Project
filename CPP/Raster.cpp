@@ -76,3 +76,15 @@ width(r.width), height(r.height), data(r.data){
 Raster::~Raster(void){
     delete[] this->data;
 }
+
+char* Raster::linearPackData(void) const {
+    char* c = (char*)malloc(this->getLinearDataSize()*sizeof(uint32_t));
+
+    const size_t row_len_bytes = width * sizeof(uint32_t);
+
+    for(unsigned int i = 0; i < CEIL_DIV_32(height); i++){
+        memcpy(c+(i*row_len_bytes), (*this)[i].getData(), row_len_bytes);
+    }
+
+    return c;
+}

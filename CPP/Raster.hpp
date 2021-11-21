@@ -32,6 +32,10 @@ public:
         inline const uint32_t& operator[](const int index) const {
             return data[index];
         }
+
+        inline uint32_t* getData(void) const {
+            return data;
+        }
     };
 protected:
     PosType width;
@@ -48,10 +52,9 @@ public:
     inline size_t getSize(void) const {return width * height;}
 
     // return the size of the raster packed into linear memory of uint32_t chunks
-    //  according
+    //  the number of uint32_t registers needed for this raster
     inline size_t getLinearDataSize(void) const {
-        const auto height_32 = (height >> 5) + (height & (0b11111) ? (1) : (0));
-        return height_32 * width; 
+        return CEIL_DIV_32(height) * width; 
     }
 
     inline PosType getWidth(void) const {return width;}
@@ -64,4 +67,6 @@ public:
     inline const RasterRow& operator[](const int index) const {
         return data[index >> 5]; // div by 32 to get proper height
     }
+
+    char* linearPackData(void) const;
 };
