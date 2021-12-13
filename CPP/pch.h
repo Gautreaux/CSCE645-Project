@@ -9,7 +9,22 @@
 #endif
 
 // (x % 32)
+#define FAST_MOD_2(x)  (x & 0b1)
+#define FAST_MOD_4(x)  (x & 0b11)
+#define FAST_MOD_8(x)  (x & 0b111)
+#define FAST_MOD_16(x) (x & 0b1111)
 #define FAST_MOD_32(x) (x & 0b11111)
 
+// (x / 32)
+#define FAST_DIV_2(x)  (x >> 1)
+#define FAST_DIV_4(x)  (x >> 2)
+#define FAST_DIV_8(x)  (x >> 3)
+#define FAST_DIV_16(x) (x >> 4)
+#define FAST_DIV_32(x) (x >> 5)
+
 // ceil(x/32)
+#define CEIL_DIV_2(x)  ((x >> 1) + ( FAST_MOD_2(x) ? 1 : 0)) 
+#define CEIL_DIV_4(x)  ((x >> 2) + ( FAST_MOD_4(x) ? 1 : 0)) 
+#define CEIL_DIV_8(x)  ((x >> 3) + ( FAST_MOD_8(x) ? 1 : 0)) 
+#define CEIL_DIV_16(x) ((x >> 4) + (FAST_MOD_16(x) ? 1 : 0)) 
 #define CEIL_DIV_32(x) ((x >> 5) + (FAST_MOD_32(x) ? 1 : 0)) 

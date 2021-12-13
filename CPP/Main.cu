@@ -1,13 +1,24 @@
 #include "pch.h"
 
+#include <chrono>
 #include <iostream>
+#include <vector>
 
 #include "env.hpp"
 #include "Packer.cuh"
 #include "Raster.hpp"
 #include "RasterUtils.hpp"
 
-#include <vector>
+// check if a cuda error occrred and exit if so
+inline void checkCudaError(const unsigned int line){
+    cudaError_t last_err;
+    if((last_err = cudaGetLastError()) != 0){
+        printf("[%s:%d] Cuda error %d: %s\n", 
+        __FILE__, line, last_err, cudaGetErrorName(last_err));
+        exit(1);
+    }
+}
+
 
 void displayCUDAdeviceStats(void){
     int deviceCount;
@@ -86,6 +97,130 @@ __global__ void buildCollisionMap(
     // TODO - do something here;
 }
 
+__global__ void simpleCudaKernel(const unsigned int n_rounds, uint32_t* sheet_ptr, const unsigned int pitch_uint_32){
+    // if(threadIdx.x == 0){
+    //     printf("Hello from block %d %d, thread %d\n", blockIdx.x, blockIdx.y, threadIdx.x);
+    // }
+
+    for(unsigned int i = 0; i < n_rounds; i++){
+        sheet_ptr[((blockIdx.y*blockDim.y*n_rounds + i) * pitch_uint_32) + (blockIdx.x*blockDim.x  + threadIdx.x)] = ~0;
+    }
+}
+
+void simple_cuda(void){
+    // lets compute some constants
+    
+    // width of the sheet in number of samples
+    constexpr size_t sheet_width_samples = SHEET_WIDTH_INCH*SAMPLES_PER_INCH;
+
+    // height of the sheet in number of samples
+    constexpr size_t sheet_height_samples = SHEET_HEIGHT_INCH*SAMPLES_PER_INCH;
+
+    // i just assume this is true
+    //  and not sure what will break if it isnt
+    //  next two statements for sure, but what else
+    static_assert(sizeof(uint32_t) == 4);
+
+    // height of the sheet in number of 32bit registers
+    constexpr size_t sheet_height_reg_32 = CEIL_DIV_32(sheet_height_samples);
+
+
+    // with of a row in memeory in bytes
+    constexpr size_t row_width_bytes = sizeof(uint32_t)*sheet_width_samples;
+
+    // pointer to __device__ memory allocated for storing pitch
+    void* sheet_devptr;
+
+    // value of the pitch for sheet device pointer
+    //  subsequent rows are aligned to bus breaks (512 bytes?)
+    size_t sheet_devpitch;
+
+    cudaMallocPitch(&sheet_devptr, &sheet_devpitch, row_width_bytes, sheet_height_reg_32);
+    checkCudaError(__LINE__);
+    cudaMemset2D(sheet_devptr, sheet_devpitch, 0, row_width_bytes, sheet_height_reg_32);
+    checkCudaError(__LINE__);
+    cudaDeviceSynchronize(); // force the prior two operations to complete before proceeding
+    checkCudaError(__LINE__);
+
+    // calculate block constants
+
+    // number of threads per block (width)
+    constexpr size_t block_width_thread = 32;
+
+    // number of rounds that each thread will perform
+    constexpr size_t block_height_rounds = 32;
+
+    // calculate kernel constants
+
+    // number of blocks in the kernel width
+    constexpr size_t grid_width_blocks = FAST_DIV_32(sheet_width_samples);
+    static_assert(block_width_thread == 32);
+
+    constexpr size_t grid_height_blocks = FAST_DIV_32(sheet_height_reg_32);
+    static_assert(block_height_rounds == 32);
+
+    printf(
+        "Blocks are %ld threads by %ld rounds, kernel is %ldx%ld blocks (%ldx%ld regs); "
+        "Total %ld blocks.\n",
+        block_width_thread, block_height_rounds,
+        grid_width_blocks, grid_height_blocks, 
+        sheet_width_samples, sheet_height_reg_32,
+        grid_width_blocks * grid_height_blocks
+    );
+
+    // launch and run the kernel
+
+    const dim3 block_shape = dim3(block_width_thread);
+    const dim3 grid_shape = dim3(grid_width_blocks, grid_height_blocks);
+
+    const auto start_time = std::chrono::high_resolution_clock::now();
+    simpleCudaKernel<<<grid_shape, block_shape>>>(block_height_rounds, (uint32_t*)sheet_devptr, sheet_devpitch / sizeof(uint32_t));
+    checkCudaError(__LINE__);
+    cudaDeviceSynchronize();
+    checkCudaError(__LINE__);
+    const auto end_time = std::chrono::high_resolution_clock::now();
+
+    printf("Kernel took %ld us to run\n", 
+        std::chrono::duration_cast<std::chrono::microseconds>(end_time-start_time).count()
+    );
+
+    // allocate local memory to store the output
+
+    constexpr size_t local_sheet_bytes = row_width_bytes * sheet_height_reg_32;
+
+    // ptr to local memory for the sheet
+    void* sheet_ptr = malloc(local_sheet_bytes);
+    memset(sheet_ptr, 0b1010, local_sheet_bytes);
+    const char* const sheet_ptr_c = (char*)sheet_ptr;
+
+    cudaMemcpy2D(sheet_ptr, row_width_bytes, sheet_devptr, sheet_devpitch, row_width_bytes, sheet_height_reg_32, cudaMemcpyDeviceToHost);
+    checkCudaError(__LINE__);
+    cudaDeviceSynchronize();
+    checkCudaError(__LINE__);
+
+    printf("Synchronized success\n");
+
+    size_t unset_memory_count = 0;
+    size_t zeroed_memeory_count = 0;
+    size_t correct_memory_count = 0;
+    unsigned int ctr = 0;
+    // start memory check
+    for(size_t i = 0; i < local_sheet_bytes; i++){
+        if(sheet_ptr_c[i] == 0){
+            zeroed_memeory_count += 1;
+        }else if(sheet_ptr_c[i] == ~0){
+            correct_memory_count += 1;
+        }else{
+            unset_memory_count += 1;
+        }
+    }
+
+    printf("Memcheck %ldB: %ld unset, %ld zeroed, %ld correct\n",
+        local_sheet_bytes, unset_memory_count,
+        zeroed_memeory_count, correct_memory_count
+    );
+}
+
 void hostPack_entry_cuda(const std::vector<Raster>& to_pack){
     // the Raster representing the sheet
     Raster space(SHEET_WIDTH_INCH*SAMPLES_PER_INCH, SHEET_HEIGHT_INCH*SAMPLES_PER_INCH);
@@ -121,7 +256,7 @@ void hostPack_entry_cuda(const std::vector<Raster>& to_pack){
     cudaDeviceSynchronize();
 
     const int num_blocks_x = CEIL_DIV_32(space.getWidth());
-    const dim3 gridShape = dim3(num_blocks_x, 8);
+    const dim3 gridShape = dim3(num_blocks_x, CEIL_DIV_32(space.getHeight()));
     buildCollisionMap<<<gridShape, 32>>>(
         (uint32_t*)part_on_device_ptr, (uint32_t*)sheet_on_device_ptr, 
         (uint32_t*)out_on_device_ptr, r_1.getWidth(), CEIL_DIV_32(r_1.getHeight()));
@@ -167,7 +302,8 @@ int main(const int argc, const char * const * const argv){
 
     // hostPack_entry(r_vector);
     // hostPack_entry_cpu(r_vector);
-    hostPack_entry_cuda(r_vector);
+    // hostPack_entry_cuda(r_vector);
     
+    simple_cuda();
 
 }
