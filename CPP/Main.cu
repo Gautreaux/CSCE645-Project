@@ -57,51 +57,6 @@ void displayCUDAdeviceStats(void){
     }
 }
 
-// TODO - remove
-void hostPack_entry_cpu(const std::vector<Raster>& to_pack){
-    Raster space(SHEET_WIDTH_INCH*SAMPLES_PER_INCH, SHEET_HEIGHT_INCH*SAMPLES_PER_INCH);
-
-    for(unsigned int i =0; i < to_pack.size(); i++){
-        const Raster& this_part = to_pack[i];
-
-        std::cout << "S";
-        std::flush(std::cout);
-
-        const Raster& possible_locations = buildPackMap_cpu(space, this_part);
-
-        std::cout << ".M";
-        std::flush(std::cout);
-
-        PosType x_place, y_place;
-        uint8_t y_out_offset;
-
-        pickBestPosition_cpu(possible_locations, x_place, y_place, y_out_offset);
-        std::cout << ".P-";
-        std::flush(std::cout);
-        bakeRaster_cpu(this_part, space, x_place, y_place, y_out_offset);
-        std::cout << ".DONE  ";
-        std::flush(std::cout);
-
-        std::cout << "Packer placed raster." << i << " at " << x_place 
-            << " " << y_place << "+" << y_out_offset << std::endl;
-
-    }
-}
-
-
-// TODO - remove
-__global__ void buildCollisionMap(
-    const uint32_t* const part, const uint32_t* const space, 
-    uint32_t* const out_array, const PosType part_width,
-    const PosType part_height)
-{
-    uint32_t my_x = blockDim.x * blockIdx.x + threadIdx.x;
-    uint32_t my_y = blockDim.y * blockIdx.y;
-
-    out_array[my_x] = 5;
-
-    // TODO - do something here;
-}
 
 __device__ inline int fromXY(const unsigned int x, const unsigned int y, const unsigned int width_stride){
     return y * width_stride + x;
@@ -162,6 +117,108 @@ __global__ void simpleCudaKernel(
         }
     }
 }
+
+// for each x_value find the lowst non-colliding y value
+//  i.e. the first zero bit
+__global__ void findBestPlacement(
+    uint32_t* output_ptr, const unsigned int output_pitch_uint_32,
+    const unsigned output_width, const unsigned int output_height_reg_32,
+    uint32_t* storage
+){
+    // x-value of this worker
+    const unsigned int my_x = blockIdx.x * blockDim.x + threadIdx.x;
+
+    extern __shared__ uint32_t s[];
+
+    s[threadIdx.x] = ~0;
+
+    if(my_x >= output_width){
+        // pass
+    }else{
+        unsigned int best_y = output_height_reg_32;
+        for(unsigned int y_offset = 0; y_offset < output_height_reg_32; y_offset++){
+            const unsigned int c = output_ptr[fromXY(my_x, y_offset, output_pitch_uint_32)];
+
+            if(c == ~0){
+                // all of the spots are collisions 
+                continue;
+            }
+
+            constexpr uint8_t lut[] = {0,1,0,2,0,1,0,3,0,1,0,2,0,1,0,4};
+
+            // there is a zero somewhere, so we can find it easily
+            best_y = 31;
+            #pragma unroll
+            for(unsigned int i = 0; i < 32; i+=4){
+                const uint32_t t = lut[(c & (0xF << i)) >> i];
+
+                if(t == 4){
+                    continue;
+                }
+
+                best_y = t + i;
+                break;
+            }
+            
+            s[threadIdx.x] = best_y + (y_offset * 32);
+            break;
+        }
+    }
+    __syncthreads();
+
+    if(FAST_MOD_2(threadIdx.x) == 0){
+        if(s[threadIdx.x] == ~0){
+            s[threadIdx.x] = s[threadIdx.x+1];
+        }
+    }
+    __syncthreads();
+    if(FAST_MOD_4(threadIdx.x) == 0){
+        if(s[threadIdx.x] == ~0){
+            s[threadIdx.x] = s[threadIdx.x+2];
+        }
+    }
+    __syncthreads();
+    if(FAST_MOD_8(threadIdx.x) == 0){
+        if(s[threadIdx.x] == ~0){
+            s[threadIdx.x] = s[threadIdx.x+4];
+        }
+    }
+    __syncthreads();
+    if(FAST_MOD_16(threadIdx.x) == 0){
+        if(s[threadIdx.x] == ~0){
+            s[threadIdx.x] = s[threadIdx.x+8];
+        }
+    }
+    __syncthreads();
+    if(FAST_MOD_32(threadIdx.x) == 0){
+        if(s[threadIdx.x] == ~0){
+            s[threadIdx.x] = s[threadIdx.x+16];
+        }
+    }
+    __syncthreads();
+    if(FAST_MOD_64(threadIdx.x) == 0){
+        if(s[threadIdx.x] == ~0){
+            s[threadIdx.x] = s[threadIdx.x+32];
+        }
+    }
+    __syncthreads();
+    if(FAST_MOD_128(threadIdx.x) == 0){
+        if(s[threadIdx.x] == ~0){
+            s[threadIdx.x] = s[threadIdx.x+64];
+        }
+    }
+    __syncthreads();
+
+    // TODO - need to return the the y value and x value from the block
+    if(threadIdx.x == 0){
+        if(s[0] == ~0){
+            storage[blockIdx.x] = s[128];
+        }else{
+            storage[blockIdx.x] = s[0];
+        }
+    }
+}
+
 
 void simple_cuda(const Raster& part){
     // lets compute some constants
@@ -236,6 +293,12 @@ void simple_cuda(const Raster& part){
     CUDACall(cudaMemset2D(part_devptr, part_devpitch, 0, part_row_width_bytes, part_height_reg_32));
     CUDACall(cudaDeviceSynchronize()); // force the prior operations to complete before proceeding
 
+    // create the storage pointer
+    const int num_reduce_storage_blocks = CEIL_DIV_256(output_width_samples);
+
+    void* storage_devptr;
+    CUDACall(cudaMalloc(&storage_devptr, sizeof(uint32_t)*num_reduce_storage_blocks));
+
     printf("Allocated arrays successfully.\n");
 
     // calculate block constants
@@ -288,6 +351,15 @@ void simple_cuda(const Raster& part){
 
     checkCudaError(__LINE__);
     
+    // CUDACall(cudaDeviceSynchronize());
+    findBestPlacement<<<num_reduce_storage_blocks, 256, 256*sizeof(uint32_t)>>>(
+        (uint32_t*)output_devptr, output_devpitch / sizeof(uint32_t),
+        output_width_samples, output_height_reg_32,
+        (uint32_t*)storage_devptr
+    );
+
+    checkCudaError(__LINE__);
+    
     CUDACall(cudaDeviceSynchronize());
     const auto end_time = std::chrono::high_resolution_clock::now();
 
@@ -313,17 +385,22 @@ void simple_cuda(const Raster& part){
     memset(output_ptr, 0b1010, local_output_bytes);
     const char* const output_ptr_c = (char*)output_ptr;
 
+    // ptr to local memory for the storage
+    void* storage_ptr = malloc(sizeof(uint32_t)*num_reduce_storage_blocks);
+    const uint32_t* storage_ptr_uint32 = (uint32_t*)(storage_ptr);
+
     CUDACall(cudaMemcpy2D(sheet_ptr, row_width_bytes, sheet_devptr, sheet_devpitch, row_width_bytes, sheet_height_reg_32, cudaMemcpyDeviceToHost));
     CUDACall(cudaMemcpy2D(output_ptr, output_row_width_bytes, output_devptr, output_devpitch, output_row_width_bytes, output_height_reg_32, cudaMemcpyDeviceToHost));
+    CUDACall(cudaMemcpy(storage_ptr, storage_devptr, sizeof(uint32_t)*num_reduce_storage_blocks, cudaMemcpyDeviceToHost));
     CUDACall(cudaDeviceSynchronize());
 
     printf("Synchronized success\n");
+    printf("%ld\n", storage_ptr_uint32[0]);
 
     {
         size_t unset_memory_count = 0;
         size_t zeroed_memeory_count = 0;
         size_t correct_memory_count = 0;
-        unsigned int ctr = 0;
         // start memory check
         for (size_t i = 0; i < local_sheet_bytes; i++)
         {
@@ -351,7 +428,6 @@ void simple_cuda(const Raster& part){
         size_t unset_memory_count = 0;
         size_t zeroed_memeory_count = 0;
         size_t correct_memory_count = 0;
-        unsigned int ctr = 0;
         // start memory check
         for (size_t i = 0; i < local_output_bytes; i++)
         {
@@ -381,48 +457,6 @@ void simple_cuda(const Raster& part){
     CUDACall(cudaFree(part_devptr));
 }
 
-void hostPack_entry_cuda(const std::vector<Raster>& to_pack){
-    // the Raster representing the sheet
-    Raster space(SHEET_WIDTH_INCH*SAMPLES_PER_INCH, SHEET_HEIGHT_INCH*SAMPLES_PER_INCH);
-
-    void* sheet_on_device_ptr;
-    size_t pitch_device;
-
-    // TODO - error checking
-    cudaMallocPitch(&sheet_on_device_ptr, &pitch_device, sizeof(uint32_t)*space.getWidth(), CEIL_DIV_32(space.getHeight()));
-    cudaMemset2D(sheet_on_device_ptr, pitch_device, 0, sizeof(uint32_t)*space.getWidth(), CEIL_DIV_32(space.getHeight()));
-    cudaDeviceSynchronize();
-
-    const Raster& r_1 = to_pack[0];
-    char* const r_1_linearized = r_1.linearPackData();
-
-    void* part_on_device_ptr;
-    size_t pitch_part;
-
-    // TODO - error checking
-    cudaMallocPitch(&part_on_device_ptr, &pitch_part, sizeof(uint32_t)*r_1.getWidth(), CEIL_DIV_32(r_1.getHeight()));
-    cudaMemcpy2D(part_on_device_ptr, pitch_part, r_1_linearized, sizeof(uint32_t)*r_1.getWidth(), sizeof(uint32_t)*r_1.getWidth(), r_1.getHeight(), cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
-
-    const size_t out_width = space.getWidth() - r_1.getWidth() + 1;
-    const size_t out_height = CEIL_DIV_32(space.getHeight()) - CEIL_DIV_32(r_1.getHeight()) + 1;
-    
-    void* out_on_device_ptr;
-    size_t pitch_out;
-    
-    // TODO - error checking
-    cudaMallocPitch(&out_on_device_ptr, &pitch_out, sizeof(uint32_t)*out_width, out_height);
-    cudaMemset2D(out_on_device_ptr, pitch_out, 0, out_width*sizeof(uint32_t), out_height);
-    cudaDeviceSynchronize();
-
-    const int num_blocks_x = CEIL_DIV_32(space.getWidth());
-    const dim3 gridShape = dim3(num_blocks_x, CEIL_DIV_32(space.getHeight()));
-    buildCollisionMap<<<gridShape, 32>>>(
-        (uint32_t*)part_on_device_ptr, (uint32_t*)sheet_on_device_ptr, 
-        (uint32_t*)out_on_device_ptr, r_1.getWidth(), CEIL_DIV_32(r_1.getHeight()));
-    cudaDeviceSynchronize();
-    std::cout << "All done" << std::endl;
-}
 
 int main(const int argc, const char * const * const argv){
     // TODO - endianness checks on entry
