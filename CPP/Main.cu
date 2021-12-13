@@ -9,6 +9,9 @@
 #include "Raster.hpp"
 #include "RasterUtils.hpp"
 
+#define CUDACall(x) {x; checkCudaError(__LINE__);}
+
+
 // check if a cuda error occrred and exit if so
 inline void checkCudaError(const unsigned int line){
     cudaError_t last_err;
@@ -19,7 +22,7 @@ inline void checkCudaError(const unsigned int line){
     }
 }
 
-
+// display certain device statistics to the console
 void displayCUDAdeviceStats(void){
     int deviceCount;
     cudaGetDeviceCount(&deviceCount);
@@ -54,6 +57,7 @@ void displayCUDAdeviceStats(void){
     }
 }
 
+// TODO - remove
 void hostPack_entry_cpu(const std::vector<Raster>& to_pack){
     Raster space(SHEET_WIDTH_INCH*SAMPLES_PER_INCH, SHEET_HEIGHT_INCH*SAMPLES_PER_INCH);
 
@@ -84,6 +88,8 @@ void hostPack_entry_cpu(const std::vector<Raster>& to_pack){
     }
 }
 
+
+// TODO - remove
 __global__ void buildCollisionMap(
     const uint32_t* const part, const uint32_t* const space, 
     uint32_t* const out_array, const PosType part_width,
@@ -97,17 +103,37 @@ __global__ void buildCollisionMap(
     // TODO - do something here;
 }
 
-__global__ void simpleCudaKernel(const unsigned int n_rounds, uint32_t* sheet_ptr, const unsigned int pitch_uint_32){
+__device__ inline int fromXY(const unsigned int x, const unsigned int y, const unsigned int width_stride){
+    return y * width_stride + x;
+}
+
+template <int n_rounds>
+__global__ void simpleCudaKernel(
+    uint32_t* sheet_ptr, const unsigned int sheet_pitch_uint_32,
+    uint32_t* output_ptr, const unsigned int output_pitch_uint_32,
+    uint32_t* part_prt, const unsigned int part_pitch_uint32,
+    const unsigned int sheet_width, const unsigned int sheet_height,
+    const unsigned int part_width, const unsigned int part_height){
     // if(threadIdx.x == 0){
     //     printf("Hello from block %d %d, thread %d\n", blockIdx.x, blockIdx.y, threadIdx.x);
     // }
 
-    for(unsigned int i = 0; i < n_rounds; i++){
-        sheet_ptr[((blockIdx.y*blockDim.y*n_rounds + i) * pitch_uint_32) + (blockIdx.x*blockDim.x  + threadIdx.x)] = ~0;
+    for(unsigned int y_offset = 0; y_offset < n_rounds; y_offset++){
+        // miniumum possible region of the part that can overlap
+        unsigned int my_x = blockIdx.x*blockDim.x + threadIdx.x;
+        unsigned int my_y = blockIdx.y*blockDim.y*n_rounds + y_offset;
+
+        // const unsigned int min_part_x = min(my_x, part_width);
+        // const unsigned int min_part_y = min(my_y, part_height);
+        // const unsigned int max_part_x = ((part_width + my_x > sheet_width) ? (part_width + my_x - sheet_width) : 0);
+        // const unsigned int max_part_y = ((part_height + my_y > sheet_height) ? (part_height + my_y - sheet_height) : 0);
+
+        sheet_ptr[fromXY(my_x, my_y, sheet_pitch_uint_32)] = ~0;
+        // sheet_ptr[((blockIdx.y*blockDim.y*n_rounds + i) * sheet_pitch_uint_32) + (blockIdx.x*blockDim.x  + threadIdx.x)] = ~0;
     }
 }
 
-void simple_cuda(void){
+void simple_cuda(const Raster& part){
     // lets compute some constants
     
     // width of the sheet in number of samples
@@ -124,23 +150,63 @@ void simple_cuda(void){
     // height of the sheet in number of 32bit registers
     constexpr size_t sheet_height_reg_32 = CEIL_DIV_32(sheet_height_samples);
 
-
-    // with of a row in memeory in bytes
+    // with of a row in memory in bytes
     constexpr size_t row_width_bytes = sizeof(uint32_t)*sheet_width_samples;
 
-    // pointer to __device__ memory allocated for storing pitch
+    // width of the ouput in number of samples
+    const size_t output_width_samples = sheet_width_samples - part.getWidth() + 1;
+
+    // height of the ouput in number of samples
+    const size_t output_height_samples = sheet_height_samples - part.getHeight() + 1;
+
+    // height of the output in number of 32bit registers
+    const size_t output_height_reg_32 = CEIL_DIV_32(output_height_samples);
+    
+    // width of a row in number of bytes
+    const size_t output_row_width_bytes = sizeof(uint32_t)*output_width_samples;
+
+    // with of the part in number of samples
+    const size_t part_width_samples = part.getWidth();
+
+    // height of the part in number of samples
+    const size_t part_height_samples = part.getHeight();
+
+    // height of the part in number of 32bit registers
+    const size_t part_height_reg_32 = CEIL_DIV_32(part_height_samples);
+
+    // width of a row in number of bytes
+    const size_t part_row_width_bytes = sizeof(uint32_t)*part_width_samples;
+    
+    // TODO - const qualify, const cast these six
+
+    // pointer to __device__ memory allocated for storing sheet
     void* sheet_devptr;
 
     // value of the pitch for sheet device pointer
     //  subsequent rows are aligned to bus breaks (512 bytes?)
     size_t sheet_devpitch;
 
-    cudaMallocPitch(&sheet_devptr, &sheet_devpitch, row_width_bytes, sheet_height_reg_32);
-    checkCudaError(__LINE__);
-    cudaMemset2D(sheet_devptr, sheet_devpitch, 0, row_width_bytes, sheet_height_reg_32);
-    checkCudaError(__LINE__);
-    cudaDeviceSynchronize(); // force the prior two operations to complete before proceeding
-    checkCudaError(__LINE__);
+    // pointer to __device__ memory allocated for storing the part
+    void* part_devptr = nullptr;
+
+    // value of the pitch for part device pointer
+    size_t part_devpitch;
+
+    // pointer to __device__ memort allocated for storing the part
+    void* output_devptr;
+
+    // value of the pitch for output device pointer
+    size_t output_devpitch;
+
+    CUDACall(cudaMallocPitch(&sheet_devptr, &sheet_devpitch, row_width_bytes, sheet_height_reg_32));
+    CUDACall(cudaMemset2D(sheet_devptr, sheet_devpitch, 0, row_width_bytes, sheet_height_reg_32));
+    CUDACall(cudaMallocPitch(&output_devptr, &output_devpitch, output_row_width_bytes, output_height_reg_32));
+    CUDACall(cudaMemset2D(output_devptr, output_devpitch, 0, output_row_width_bytes, output_height_reg_32));
+    CUDACall(cudaMallocPitch(&part_devptr, &part_devpitch, part_row_width_bytes, part_height_reg_32));
+    CUDACall(cudaMemset2D(part_devptr, part_devpitch, 0, part_row_width_bytes, part_height_reg_32));
+    CUDACall(cudaDeviceSynchronize()); // force the prior operations to complete before proceeding
+
+    printf("Allocated arrays successfully.\n");
 
     // calculate block constants
 
@@ -174,10 +240,17 @@ void simple_cuda(void){
     const dim3 grid_shape = dim3(grid_width_blocks, grid_height_blocks);
 
     const auto start_time = std::chrono::high_resolution_clock::now();
-    simpleCudaKernel<<<grid_shape, block_shape>>>(block_height_rounds, (uint32_t*)sheet_devptr, sheet_devpitch / sizeof(uint32_t));
+    simpleCudaKernel<block_height_rounds><<<grid_shape, block_shape>>>(
+        (uint32_t*)sheet_devptr, sheet_devpitch / sizeof(uint32_t),
+        (uint32_t*)output_devptr, output_devpitch / sizeof(uint32_t),
+        (uint32_t*)part_devptr, part_devpitch / sizeof(uint32_t),
+        sheet_width_samples, sheet_height_samples,
+        part.getWidth(), part.getHeight()
+    );
+
     checkCudaError(__LINE__);
-    cudaDeviceSynchronize();
-    checkCudaError(__LINE__);
+    
+    CUDACall(cudaDeviceSynchronize());
     const auto end_time = std::chrono::high_resolution_clock::now();
 
     printf("Kernel took %ld us to run\n", 
@@ -193,10 +266,8 @@ void simple_cuda(void){
     memset(sheet_ptr, 0b1010, local_sheet_bytes);
     const char* const sheet_ptr_c = (char*)sheet_ptr;
 
-    cudaMemcpy2D(sheet_ptr, row_width_bytes, sheet_devptr, sheet_devpitch, row_width_bytes, sheet_height_reg_32, cudaMemcpyDeviceToHost);
-    checkCudaError(__LINE__);
-    cudaDeviceSynchronize();
-    checkCudaError(__LINE__);
+    CUDACall(cudaMemcpy2D(sheet_ptr, row_width_bytes, sheet_devptr, sheet_devpitch, row_width_bytes, sheet_height_reg_32, cudaMemcpyDeviceToHost));
+    CUDACall(cudaDeviceSynchronize());
 
     printf("Synchronized success\n");
 
@@ -219,6 +290,10 @@ void simple_cuda(void){
         local_sheet_bytes, unset_memory_count,
         zeroed_memeory_count, correct_memory_count
     );
+
+    CUDACall(cudaFree(output_devptr));
+    CUDACall(cudaFree(sheet_devptr));
+    CUDACall(cudaFree(part_devptr));
 }
 
 void hostPack_entry_cuda(const std::vector<Raster>& to_pack){
@@ -304,6 +379,6 @@ int main(const int argc, const char * const * const argv){
     // hostPack_entry_cpu(r_vector);
     // hostPack_entry_cuda(r_vector);
     
-    simple_cuda();
+    simple_cuda(r_vector[0]);
 
 }
