@@ -61,11 +61,11 @@ public:
     inline PosType getHeight(void) const {return height;}
 
     inline RasterRow& operator[](const int index){
-        return data[index >> 5]; // div by 32 to get proper height
+        return data[FAST_DIV_32(index)]; // div by 32 to get proper height
     }
 
     inline const RasterRow& operator[](const int index) const {
-        return data[index >> 5]; // div by 32 to get proper height
+        return data[FAST_DIV_32(index)]; // div by 32 to get proper height
     }
 
     char* linearPackData(void) const;

@@ -118,18 +118,48 @@ __global__ void simpleCudaKernel(
     //     printf("Hello from block %d %d, thread %d\n", blockIdx.x, blockIdx.y, threadIdx.x);
     // }
 
-    for(unsigned int y_offset = 0; y_offset < n_rounds; y_offset++){
+    for(unsigned int round_y_offset = 0; round_y_offset < n_rounds; round_y_offset++){
         // miniumum possible region of the part that can overlap
+
+        // the x_block coordinate we are responsible for
         unsigned int my_x = blockIdx.x*blockDim.x + threadIdx.x;
-        unsigned int my_y = blockIdx.y*blockDim.y*n_rounds + y_offset;
 
-        // const unsigned int min_part_x = min(my_x, part_width);
-        // const unsigned int min_part_y = min(my_y, part_height);
-        // const unsigned int max_part_x = ((part_width + my_x > sheet_width) ? (part_width + my_x - sheet_width) : 0);
-        // const unsigned int max_part_y = ((part_height + my_y > sheet_height) ? (part_height + my_y - sheet_height) : 0);
+        // the y_block coordinate we are responsible for
+        unsigned int my_y = blockIdx.y*blockDim.y*n_rounds + round_y_offset;
 
+        // the value of the sheet at the given cell
+        const uint32_t sheet_value = sheet_ptr[fromXY(my_x, my_y, sheet_pitch_uint_32)];
+
+        // TODO - remove
+        //  sheet ptr should be const; this is just for testing
         sheet_ptr[fromXY(my_x, my_y, sheet_pitch_uint_32)] = ~0;
-        // sheet_ptr[((blockIdx.y*blockDim.y*n_rounds + i) * sheet_pitch_uint_32) + (blockIdx.x*blockDim.x  + threadIdx.x)] = ~0;
+
+        // TODO - check if these are really what we want
+        const unsigned int min_part_x = min(my_x, part_width);
+        const unsigned int min_part_y = min(my_y, part_height);
+        const unsigned int max_part_x = ((part_width + my_x > sheet_width) ? (part_width + my_x - sheet_width) : 0);
+        const unsigned int max_part_y = ((part_height + my_y > sheet_height) ? (part_height + my_y - sheet_height) : 0);
+
+        // TODO - actually figure out
+        for(unsigned int current_part_x = min_part_x; current_part_x <= max_part_x; current_part_x++){ // over x
+            for(unsigned int current_part_y=min_part_y; current_part_y <= max_part_y; current_part_y++){ // over y
+                const unsigned int current_part_x = 0;
+                const unsigned int current_part_y = 0;
+
+                const uint32_t a1 = sheet_ptr[fromXY(current_part_x, current_part_y, part_pitch_uint32)];
+                const uint32_t a2 = ((current_part_y) ? (sheet_ptr[fromXY(current_part_x, current_part_y-1, part_pitch_uint32)]) : (0));
+
+                uint32_t c = 0;
+
+                #pragma unroll
+                for(unsigned int i = 0; i < 32; i++){
+                    const uint32_t t = ((a1 << i) & sheet_value) | ((a2 >> (32-i)) & sheet_value);
+                    c |= (t ? (1 << i) : 0);
+                }
+
+                atomicOr(output_ptr + fromXY(current_part_x + my_x, current_part_y + my_y, output_pitch_uint_32), c);
+            }
+        }
     }
 }
 
@@ -234,6 +264,14 @@ void simple_cuda(const Raster& part){
         grid_width_blocks * grid_height_blocks
     );
 
+    // copy in the data for the part
+    {
+        const char* c = part.linearPackData();
+        const size_t lcl_pitch = part.getWidth() * sizeof(uint32_t);
+        CUDACall(cudaMemcpy2D(part_devptr, part_devpitch, c, lcl_pitch, part.getWidth() * sizeof(uint32_t), CEIL_DIV_32(part.getHeight()), cudaMemcpyHostToDevice))
+        delete c;
+    }
+
     // launch and run the kernel
 
     const dim3 block_shape = dim3(block_width_thread);
@@ -259,38 +297,85 @@ void simple_cuda(const Raster& part){
 
     // allocate local memory to store the output
 
+    // number of local bytes to represent the sheet
     constexpr size_t local_sheet_bytes = row_width_bytes * sheet_height_reg_32;
 
+    // number of local bytes to represent the output
+    const size_t local_output_bytes = output_row_width_bytes * output_height_reg_32;
+    
     // ptr to local memory for the sheet
     void* sheet_ptr = malloc(local_sheet_bytes);
     memset(sheet_ptr, 0b1010, local_sheet_bytes);
     const char* const sheet_ptr_c = (char*)sheet_ptr;
 
+    // ptr to local memory for the output
+    void* output_ptr = malloc(local_output_bytes);
+    memset(output_ptr, 0b1010, local_output_bytes);
+    const char* const output_ptr_c = (char*)output_ptr;
+
     CUDACall(cudaMemcpy2D(sheet_ptr, row_width_bytes, sheet_devptr, sheet_devpitch, row_width_bytes, sheet_height_reg_32, cudaMemcpyDeviceToHost));
+    CUDACall(cudaMemcpy2D(output_ptr, output_row_width_bytes, output_devptr, output_devpitch, output_row_width_bytes, output_height_reg_32, cudaMemcpyDeviceToHost));
     CUDACall(cudaDeviceSynchronize());
 
     printf("Synchronized success\n");
 
-    size_t unset_memory_count = 0;
-    size_t zeroed_memeory_count = 0;
-    size_t correct_memory_count = 0;
-    unsigned int ctr = 0;
-    // start memory check
-    for(size_t i = 0; i < local_sheet_bytes; i++){
-        if(sheet_ptr_c[i] == 0){
-            zeroed_memeory_count += 1;
-        }else if(sheet_ptr_c[i] == ~0){
-            correct_memory_count += 1;
-        }else{
-            unset_memory_count += 1;
+    {
+        size_t unset_memory_count = 0;
+        size_t zeroed_memeory_count = 0;
+        size_t correct_memory_count = 0;
+        unsigned int ctr = 0;
+        // start memory check
+        for (size_t i = 0; i < local_sheet_bytes; i++)
+        {
+            if (sheet_ptr_c[i] == 0)
+            {
+                zeroed_memeory_count += 1;
+            }
+            else if (sheet_ptr_c[i] == ~0)
+            {
+                correct_memory_count += 1;
+            }
+            else
+            {
+                unset_memory_count += 1;
+            }
         }
+
+        printf("Memcheck %ldB: %ld unset, %ld zeroed, %ld correct\n",
+               local_sheet_bytes, unset_memory_count,
+               zeroed_memeory_count, correct_memory_count);
     }
 
-    printf("Memcheck %ldB: %ld unset, %ld zeroed, %ld correct\n",
-        local_sheet_bytes, unset_memory_count,
-        zeroed_memeory_count, correct_memory_count
-    );
 
+    {
+        size_t unset_memory_count = 0;
+        size_t zeroed_memeory_count = 0;
+        size_t correct_memory_count = 0;
+        unsigned int ctr = 0;
+        // start memory check
+        for (size_t i = 0; i < local_output_bytes; i++)
+        {
+            if (output_ptr_c[i] == 0)
+            {
+                zeroed_memeory_count += 1;
+            }
+            else if (output_ptr_c[i] == ~0)
+            {
+                correct_memory_count += 1;
+            }
+            else
+            {
+                unset_memory_count += 1;
+            }
+        }
+
+        printf("Memcheck %ldB: %ld unset, %ld zeroed, %ld correct\n",
+               local_output_bytes, unset_memory_count,
+               zeroed_memeory_count, correct_memory_count);
+    }
+
+    free(sheet_ptr);
+    free(output_ptr);
     CUDACall(cudaFree(output_devptr));
     CUDACall(cudaFree(sheet_devptr));
     CUDACall(cudaFree(part_devptr));
