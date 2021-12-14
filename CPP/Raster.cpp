@@ -62,7 +62,7 @@ width(w), height(h), data(new RasterRow[CEIL_DIV_32(h)])
 Raster::Raster(const Raster& r): 
 width(r.width), height(r.height), data(new RasterRow[CEIL_DIV_32(r.height)]){
     for(unsigned int i = 0; i < CEIL_DIV_32(r.height); i++){
-        data[i] = r[i];
+        data[i] = r.data[i];
     }
 }
 
@@ -83,8 +83,59 @@ char* Raster::linearPackData(void) const {
     const size_t row_len_bytes = width * sizeof(uint32_t);
 
     for(unsigned int i = 0; i < CEIL_DIV_32(height); i++){
-        memcpy(c+(i*row_len_bytes), (*this)[i].getData(), row_len_bytes);
+        memcpy(c+(i*getLinearPackStride()), data[i].getData(), row_len_bytes);
     }
 
     return c;
+}
+
+unsigned char Raster::getBit(const int x, const int y) const {
+    assert(x >= 0);
+    assert(x < width);
+    assert(y >= 0);
+    assert(y < height);
+    uint32_t cell = data[FAST_DIV_32(y)][x];
+    return (cell & (1 << FAST_MOD_32(y))) >> (FAST_MOD_32(y));
+}
+
+void Raster::setBit(const int x, const int y){
+    assert(x >= 0);
+    assert(x < width);
+    assert(y >= 0);
+    assert(y < height);
+    data[FAST_DIV_32(y)][x] |= (1 << FAST_MOD_32(y));
+}
+
+void Raster::clearBit(const int x, const int y){
+    assert(x >= 0);
+    assert(x < width);
+    assert(y >= 0);
+    assert(y < height);
+    data[FAST_DIV_32(y)][x] &= (~(1 << FAST_MOD_32(y)));
+}
+
+void Raster::print(
+    const PosType max_x, const PosType max_y,
+    const PosType min_x, const PosType min_y
+) const {
+    if (max_x == (PosType)~0){
+        const_cast<PosType&>(max_x) = this->width;
+    }
+    if (max_y == (PosType)~0){
+        const_cast<PosType&>(max_y) = this->height;
+    }
+
+    printf("======Raster %u x %u (%u) [%u %u] ========\n", max_x - min_x, CEIL_DIV_32(max_y) - CLAMP_32(min_y), max_y - min_y, this->width, this->height);
+
+    for(unsigned int i = CLAMP_32(min_y) ; i < CEIL_DIV_32(max_y); i++){
+        // print a single row
+        const auto data_row = data[i].getData();
+        for(unsigned int j = min_x; j < max_x; j++){
+            printf("%08X ", data_row[j]);
+        }
+        printf("\n");
+    }
+
+
+    printf("================================\n");
 }

@@ -404,7 +404,7 @@ void simple_cuda(const Raster& part){
     // copy in the data for the part
     {
         const char* c = part.linearPackData();
-        const size_t lcl_pitch = part.getWidth() * sizeof(uint32_t);
+        const size_t lcl_pitch = part.getLinearPackStride();
         CUDACall(cudaMemcpy2D(part_devptr, part_devpitch, c, lcl_pitch, part.getWidth() * sizeof(uint32_t), CEIL_DIV_32(part.getHeight()), cudaMemcpyHostToDevice))
         delete c;
     }
@@ -465,40 +465,6 @@ void simple_cuda(const Raster& part){
     CUDACall(cudaDeviceSynchronize());
     printf("Finished baking part\n");
 
-
-    // TODO - remove
-    //  trying to force an error condition
-    {
-        bakePart<block_height_rounds><<<dim3(num_blocks_x, num_blocks_y), dim3(block_width_thread)>>>(
-            (uint32_t*)part_devptr, part_devpitch,
-            (uint32_t*)sheet_devptr, sheet_devpitch,
-            bake_pos_x, bake_pos_y,
-            part.getWidth(), part.getHeight()
-        );
-        checkCudaError(__LINE__);
-        
-        CUDACall(cudaDeviceSynchronize());
-
-        simpleCudaKernel<block_height_rounds><<<grid_shape, block_shape>>>(
-            (uint32_t *)sheet_devptr, sheet_devpitch / sizeof(uint32_t),
-            (uint32_t *)output_devptr, output_devpitch / sizeof(uint32_t),
-            (uint32_t *)part_devptr, part_devpitch / sizeof(uint32_t),
-            sheet_width_samples, sheet_height_samples,
-            part.getWidth(), part.getHeight());
-
-        checkCudaError(__LINE__);
-
-        // CUDACall(cudaDeviceSynchronize());
-        findBestPlacement<<<num_reduce_storage_blocks, 256, 256 * sizeof(uint32_t)>>>(
-            (uint32_t *)output_devptr, output_devpitch / sizeof(uint32_t),
-            output_width_samples, output_height_reg_32,
-            (uint32_t *)storage_devptr);
-
-        checkCudaError(__LINE__);
-
-        CUDACall(cudaDeviceSynchronize());
-    }
-
     // allocate local memory to store the output
 
     // number of local bytes to represent the sheet
@@ -554,7 +520,6 @@ void simple_cuda(const Raster& part){
                local_sheet_bytes, unset_memory_count,
                zeroed_memeory_count, correct_memory_count);
     }
-
 
     {
         size_t unset_memory_count = 0;
@@ -629,6 +594,8 @@ int main(const int argc, const char * const * const argv){
     // hostPack_entry(r_vector);
     // hostPack_entry_cpu(r_vector);
     // hostPack_entry_cuda(r_vector);
+
+    r_vector[0].print(8, 385);
     
     simple_cuda(r_vector[0]);
 
