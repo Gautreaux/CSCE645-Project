@@ -37,3 +37,13 @@
 #define CEIL_DIV_64(x)  ((x >> 5) + ( FAST_MOD_64(x) ? 1 : 0)) 
 #define CEIL_DIV_128(x) ((x >> 5) + (FAST_MOD_128(x) ? 1 : 0)) 
 #define CEIL_DIV_256(x) ((x >> 5) + (FAST_MOD_256(x) ? 1 : 0)) 
+
+// clamp(x, 32)
+#define CLAMP_2(x)   (x & ~(0b1))
+#define CLAMP_4(x)   (x & ~(0b11))
+#define CLAMP_8(x)   (x & ~(0b111))
+#define CLAMP_16(x)  (x & ~(0b1111))
+#define CLAMP_32(x)  (x & ~(0b11111))
+#define CLAMP_64(x)  (x & ~(0b111111))
+#define CLAMP_128(x) (x & ~(0b1111111))
+#define CLAMP_256(x) (x & ~(0b11111111))

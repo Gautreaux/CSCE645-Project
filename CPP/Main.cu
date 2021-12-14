@@ -92,9 +92,8 @@ __global__ void simpleCudaKernel(
         // TODO - actually figure out
         for(unsigned int current_part_x = min_part_x; current_part_x <= max_part_x; current_part_x++){ // over x
             for(unsigned int current_part_y=min_part_y; current_part_y <= max_part_y; current_part_y++){ // over y
-                const unsigned int current_part_x = 0;
-                const unsigned int current_part_y = 0;
 
+                // TODO - no need to refetch a2 from global mem, it should be old a1
                 const uint32_t a1 = sheet_ptr[fromXY(current_part_x, current_part_y, part_pitch_uint32)];
                 const uint32_t a2 = ((current_part_y) ? (sheet_ptr[fromXY(current_part_x, current_part_y-1, part_pitch_uint32)]) : (0));
 
@@ -216,48 +215,80 @@ __global__ void findBestPlacement(
 }
 
 
-// bake a part into the sheet at a given location
+// bake a part into the sheet at a given x,y location
 // TODO - incomplete
 template <int n_rounds>
 __global__ void bakePart(
     uint32_t* part_ptr, const unsigned int part_pitch_uint32,
     uint32_t* sheet_ptr, const unsigned int sheet_pitch_uint32,
-    const unsigned int x, const unsigned int y ,
-    const unsigned int part_width, const unsigned int part_height_uint32
+    const unsigned int x, const unsigned int y,
+    const unsigned int part_width, const unsigned int part_height
 ){
-    const unsigned int base_x = FAST_DIV_32(x)*32;
-    const unsigned int base_y = FAST_DIV_32(y)*32;
+    const unsigned int base_x = CLAMP_32(x);
+    const unsigned int base_y = CLAMP_32(y);
+    const unsigned int part_height_r32 = CEIL_DIV_32(part_height);
+
+    // TODO - remove print statement
+    if(blockIdx.x == 0 && threadIdx.x == 0){
+        printf("Starting bake part\n");
+    }
 
     // the x_block coordinate we are responsible for
-    unsigned int my_x = blockIdx.x*blockDim.x + threadIdx.x + base_x;
+    //  relative to sheet coordinates
+    const unsigned int sheet_x = blockIdx.x*blockDim.x + threadIdx.x + base_x;
+    const unsigned int part_x = sheet_x - x; // may underflow and thats ok
 
-    if(my_x < x){
-        // this thread is left of the part, and thus nothing to do
+    if(part_x >= part_width){
+        // we are either left or right outside
+        //  and thus have nothing to do
         __syncthreads();
         return;
     }
 
-    if(my_x >= x + part_width){
-        // this thread is right of the part, and thus nothing to do
-        __syncthreads();
-        return;
-    }
+    // the above may alternatively be expressed as
+    // if(sheet_x < x){
+    //     // this thread is left of the part, and thus nothing to do
+    //     __syncthreads();
+    //     return;
+    // }
+    // if(sheet_x >= x + part_width){
+    //     // this thread is right of the part, and thus nothing to do
+    //     __syncthreads();
+    //     return;
+    // }
+
+    uint32_t part_lower = 0;
+    uint32_t part_upper = 0;
+
+    const auto shift_amt = FAST_MOD_32(y);
+    const auto shift_amt_comp = (32 - y);
     
-    //y - base_y ensures we start at the approprite point
-    // HOW TO DO ALIGN HERE AAAAAAA
-    for(unsigned int round_y_offset = y - base_y; round_y_offset < n_rounds; round_y_offset++){
-
+    for(unsigned int round_y_offset = 0; round_y_offset < n_rounds; round_y_offset++){
         // the y_block coordinate we are responsible for
-        unsigned int my_y = blockIdx.y*blockDim.y*n_rounds + round_y_offset + base_y;
+        //  relative to the sheet
+        unsigned int sheet_y = blockIdx.y*blockDim.y*n_rounds + round_y_offset + base_y;
 
-        if(my_y >= y + part_height){
-            // we are below he
+        unsigned int part_y = sheet_y - y; // this may underflow and thats a good thing
+
+        // >= is critical for checking alignment
+        if(part_y >= part_height_r32){
+            // either underflowed so need another round
+            // or overflowed and could break
+            //  but its not that slow
+            // alternatively: could explicitly check the two conditions
             continue;
         }
 
-        uint32_t c = 0;
+        part_lower = part_upper; // shift down previous
+        part_upper = ((part_y < part_height_r32) ? part_ptr[fromXY(part_x, part_y, part_pitch_uint32)] : 0); // fetch new
 
-        atomicOr(sheet_ptr + fromXY(my_x + x, my_y + y, sheet_pitch_uint32), c);
+        const uint32_t c = ((shift_amt == 0) ? (part_upper) : ((part_upper << shift_amt) & (part_lower >> shift_amt_comp)));
+
+        const auto t = atomicOr(sheet_ptr + fromXY(sheet_x, sheet_y, sheet_pitch_uint32), c);
+
+        if (t & c){
+            printf("WARNING: Baking part produced a colliding cofiguration\n");
+        }
     }
 
     __syncthreads();
@@ -419,18 +450,54 @@ void simple_cuda(const Raster& part){
     static_assert(block_width_thread == 32);
 
     const unsigned int num_blocks_x = CEIL_DIV_32(bake_pos_x + part.getWidth()) - FAST_DIV_32(bake_pos_x);
-    const unsigned int num_blocks_y = CEIL_DIV_32(bake_pos_y + CEIL_DIV_32(part.getHeight())) - FAST_DIV_32(bake_pos_y);
+    const unsigned int num_blocks_y = CEIL_DIV_32(bake_pos_y + CEIL_DIV_32(part.getHeight())) - FAST_DIV_32(FAST_DIV_32(bake_pos_y));
+
+    printf("Bake kernel is %u x %u blocks\n", num_blocks_x, num_blocks_y);
 
     bakePart<block_height_rounds><<<dim3(num_blocks_x, num_blocks_y), dim3(block_width_thread)>>>(
         (uint32_t*)part_devptr, part_devpitch,
         (uint32_t*)sheet_devptr, sheet_devpitch,
         bake_pos_x, bake_pos_y,
-        part.getWidth(),
+        part.getWidth(), part.getHeight()
     );
     checkCudaError(__LINE__);
     
     CUDACall(cudaDeviceSynchronize());
     printf("Finished baking part\n");
+
+
+    // TODO - remove
+    //  trying to force an error condition
+    {
+        bakePart<block_height_rounds><<<dim3(num_blocks_x, num_blocks_y), dim3(block_width_thread)>>>(
+            (uint32_t*)part_devptr, part_devpitch,
+            (uint32_t*)sheet_devptr, sheet_devpitch,
+            bake_pos_x, bake_pos_y,
+            part.getWidth(), part.getHeight()
+        );
+        checkCudaError(__LINE__);
+        
+        CUDACall(cudaDeviceSynchronize());
+
+        simpleCudaKernel<block_height_rounds><<<grid_shape, block_shape>>>(
+            (uint32_t *)sheet_devptr, sheet_devpitch / sizeof(uint32_t),
+            (uint32_t *)output_devptr, output_devpitch / sizeof(uint32_t),
+            (uint32_t *)part_devptr, part_devpitch / sizeof(uint32_t),
+            sheet_width_samples, sheet_height_samples,
+            part.getWidth(), part.getHeight());
+
+        checkCudaError(__LINE__);
+
+        // CUDACall(cudaDeviceSynchronize());
+        findBestPlacement<<<num_reduce_storage_blocks, 256, 256 * sizeof(uint32_t)>>>(
+            (uint32_t *)output_devptr, output_devpitch / sizeof(uint32_t),
+            output_width_samples, output_height_reg_32,
+            (uint32_t *)storage_devptr);
+
+        checkCudaError(__LINE__);
+
+        CUDACall(cudaDeviceSynchronize());
+    }
 
     // allocate local memory to store the output
 
@@ -439,7 +506,7 @@ void simple_cuda(const Raster& part){
 
     // number of local bytes to represent the output
     const size_t local_output_bytes = output_row_width_bytes * output_height_reg_32;
-    
+
     // ptr to local memory for the sheet
     void* sheet_ptr = malloc(local_sheet_bytes);
     memset(sheet_ptr, 0b1010, local_sheet_bytes);
