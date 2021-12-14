@@ -8,19 +8,8 @@
 #include "Packer.cuh"
 #include "Raster.hpp"
 #include "RasterUtils.hpp"
+#include "CudaMemManager.cuh"
 
-#define CUDACall(x) {x; checkCudaError(__LINE__);}
-
-
-// check if a cuda error occrred and exit if so
-inline void checkCudaError(const unsigned int line){
-    cudaError_t last_err;
-    if((last_err = cudaGetLastError()) != 0){
-        printf("[%s:%d] Cuda error %d: %s\n", 
-        __FILE__, line, last_err, cudaGetErrorName(last_err));
-        exit(1);
-    }
-}
 
 // display certain device statistics to the console
 void displayCUDAdeviceStats(void){
@@ -73,11 +62,16 @@ __global__ void simpleCudaKernel(
     //     printf("Hello from block %d %d, thread %d\n", blockIdx.x, blockIdx.y, threadIdx.x);
     // }
 
+    // the x_block coordinate we are responsible for
+    unsigned int my_x = blockIdx.x*blockDim.x + threadIdx.x;
+
+    if(my_x > sheet_width){
+        __syncthreads();
+        return;
+    }
+
     for(unsigned int round_y_offset = 0; round_y_offset < n_rounds; round_y_offset++){
         // miniumum possible region of the part that can overlap
-
-        // the x_block coordinate we are responsible for
-        unsigned int my_x = blockIdx.x*blockDim.x + threadIdx.x;
 
         // the y_block coordinate we are responsible for
         unsigned int my_y = blockIdx.y*blockDim.y*n_rounds + round_y_offset;
@@ -87,7 +81,7 @@ __global__ void simpleCudaKernel(
 
         // TODO - remove
         //  sheet ptr should be const; this is just for testing
-        sheet_ptr[fromXY(my_x, my_y, sheet_pitch_uint_32)] = ~0;
+        // sheet_ptr[fromXY(my_x, my_y, sheet_pitch_uint_32)] = ~0;
 
         // TODO - check if these are really what we want
         const unsigned int min_part_x = min(my_x, part_width);
@@ -116,9 +110,11 @@ __global__ void simpleCudaKernel(
             }
         }
     }
+
+    __syncthreads();
 }
 
-// for each x_value find the lowst non-colliding y value
+// for each x_value find the lowest non-colliding y value
 //  i.e. the first zero bit
 __global__ void findBestPlacement(
     uint32_t* output_ptr, const unsigned int output_pitch_uint_32,
@@ -219,6 +215,53 @@ __global__ void findBestPlacement(
     }
 }
 
+
+// bake a part into the sheet at a given location
+// TODO - incomplete
+template <int n_rounds>
+__global__ void bakePart(
+    uint32_t* part_ptr, const unsigned int part_pitch_uint32,
+    uint32_t* sheet_ptr, const unsigned int sheet_pitch_uint32,
+    const unsigned int x, const unsigned int y ,
+    const unsigned int part_width, const unsigned int part_height_uint32
+){
+    const unsigned int base_x = FAST_DIV_32(x)*32;
+    const unsigned int base_y = FAST_DIV_32(y)*32;
+
+    // the x_block coordinate we are responsible for
+    unsigned int my_x = blockIdx.x*blockDim.x + threadIdx.x + base_x;
+
+    if(my_x < x){
+        // this thread is left of the part, and thus nothing to do
+        __syncthreads();
+        return;
+    }
+
+    if(my_x >= x + part_width){
+        // this thread is right of the part, and thus nothing to do
+        __syncthreads();
+        return;
+    }
+    
+    //y - base_y ensures we start at the approprite point
+    // HOW TO DO ALIGN HERE AAAAAAA
+    for(unsigned int round_y_offset = y - base_y; round_y_offset < n_rounds; round_y_offset++){
+
+        // the y_block coordinate we are responsible for
+        unsigned int my_y = blockIdx.y*blockDim.y*n_rounds + round_y_offset + base_y;
+
+        if(my_y >= y + part_height){
+            // we are below he
+            continue;
+        }
+
+        uint32_t c = 0;
+
+        atomicOr(sheet_ptr + fromXY(my_x + x, my_y + y, sheet_pitch_uint32), c);
+    }
+
+    __syncthreads();
+}
 
 void simple_cuda(const Raster& part){
     // lets compute some constants
@@ -366,6 +409,28 @@ void simple_cuda(const Raster& part){
     printf("Kernel took %ld us to run\n", 
         std::chrono::duration_cast<std::chrono::microseconds>(end_time-start_time).count()
     );
+
+    // TODO - these should actually be computed
+    const unsigned int bake_pos_x = 0;
+    // TODO - these should actually be computed
+    const unsigned int bake_pos_y = 0;
+
+    static_assert(block_height_rounds == 32);
+    static_assert(block_width_thread == 32);
+
+    const unsigned int num_blocks_x = CEIL_DIV_32(bake_pos_x + part.getWidth()) - FAST_DIV_32(bake_pos_x);
+    const unsigned int num_blocks_y = CEIL_DIV_32(bake_pos_y + CEIL_DIV_32(part.getHeight())) - FAST_DIV_32(bake_pos_y);
+
+    bakePart<block_height_rounds><<<dim3(num_blocks_x, num_blocks_y), dim3(block_width_thread)>>>(
+        (uint32_t*)part_devptr, part_devpitch,
+        (uint32_t*)sheet_devptr, sheet_devpitch,
+        bake_pos_x, bake_pos_y,
+        part.getWidth(),
+    );
+    checkCudaError(__LINE__);
+    
+    CUDACall(cudaDeviceSynchronize());
+    printf("Finished baking part\n");
 
     // allocate local memory to store the output
 
