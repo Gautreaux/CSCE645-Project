@@ -257,16 +257,35 @@ __global__ void findBestPlacement(
 // TODO - error in here somewhere when y != 0
 template <int n_rounds>
 __global__ void bakePart(
-    uint32_t* part_ptr, const unsigned int part_pitch_uint32,
-    uint32_t* sheet_ptr, const unsigned int sheet_pitch_uint32,
+    uint32_t const * const part_ptr, const unsigned int part_pitch_uint32,
+    uint32_t* const sheet_ptr, const unsigned int sheet_pitch_uint32,
     const unsigned int x, const unsigned int y,
     const unsigned int part_width, const unsigned int part_height
 ){
+
+#ifdef DEBUG
+    if(blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0){
+        printf(
+            "======================== Bake Part Entry ====================\n"
+            "%p %p\n"
+            "%u %u\n"
+            "{%u %u} %u %u\n"
+            "{%u %u %u}\n"
+            "{%u %u %u}\n"
+            "=============================================================\n",
+            part_ptr, sheet_ptr,
+            part_pitch_uint32, sheet_pitch_uint32, 
+            x, y, part_width, part_height,
+            gridDim.x, gridDim.y, gridDim.z,
+            blockDim.x, blockDim.y, blockDim.z
+        );
+    }
+#endif
+
     const unsigned int base_x = CLAMP_32(x);
     const unsigned int base_y = CLAMP_32(y);
     const unsigned int part_height_r32 = CEIL_DIV_32(part_height);
 
-    return;
     // the x_block coordinate we are responsible for
     //  relative to sheet coordinates
     const unsigned int sheet_x = blockIdx.x*blockDim.x + threadIdx.x + base_x;
@@ -328,12 +347,52 @@ __global__ void bakePart(
     __syncthreads();
 }
 
+void bakePartWrapper(
+    const unsigned int bake_pos_x, const unsigned int bake_pos_y,
+    const CudaMemManager2D &sheet, const CudaMemManager2D &part,
+    const unsigned int part_true_h, const unsigned int part_true_w
+)
+{
+    assert(part_true_w == part.width());
+
+    const auto sheet_params = sheet.getDeviceParameters();
+    const auto part_params = part.getDeviceParameters();
+
+    // TODO - eval for correctness
+    //  really really not convinced on these calculations
+    const dim3 grid_shape_b = dim3(
+        CEIL_DIV_32(bake_pos_x + part_true_w) - FAST_DIV_32(bake_pos_x),
+        CEIL_DIV_32(bake_pos_y + CEIL_DIV_32(part_true_h)) - FAST_DIV_32(FAST_DIV_32(bake_pos_y))
+    );
+    const dim3 block_shape_b = dim3(std_block_width);
+
+    const auto k_start_time = std::chrono::high_resolution_clock::now();
+
+    bakePart<block_height_rounds><<<grid_shape_b, block_shape_b>>>(
+        part_params.first, part_params.second,
+        sheet_params.first, sheet_params.second,
+        bake_pos_x, bake_pos_y,
+        part_true_w, part_true_h
+    );
+
+    checkCudaError(__LINE__);
+
+    CUDACall(cudaDeviceSynchronize());
+    
+    const auto k_end_time = std::chrono::high_resolution_clock::now();
+
+    printf("Bake took (%ld us kernel)\n",
+        std::chrono::duration_cast<std::chrono::microseconds>(k_end_time-k_start_time).count()
+    );
+}
+
 void calculateCollisionsWrapper(
     const CudaMemManager2D& sheet, const CudaMemManager2D& part, 
     CudaMemManager2D& collision, CudaMemManager2D& reduce,
     const unsigned int sheet_true_h, const unsigned int sheet_true_w, 
     const unsigned int part_true_h, const unsigned int part_true_w,
-    const unsigned int collision_true_h, const unsigned int collision_true_w
+    const unsigned int collision_true_h, const unsigned int collision_true_w,
+    bool bake_result = false
 ){
     assert(sheet.width() == sheet_true_w);
     assert(part.width() == part_true_w);
@@ -395,47 +454,42 @@ void calculateCollisionsWrapper(
     
     reduce.Pull();
 
+#ifdef DEBUG
     printf("Reduce Results: ");
     for(unsigned int i = 0; i < grid_shape_r.x; i++){
         printf("{%u %u} ", reduce.at(i*2,0), reduce.at(i*2+1, 0));
     }
     printf("\n");
+#endif
 
-    printf("Reduce stats: %lu x %lu (%u) s: %lu b: %lu %p\n", reduce.width(), reduce.height(), grid_shape_r.x,
-        reduce.getHostStride(), reduce.getRawWidthBytes(), reduce.gethostPtr_unsafe()
-    );
+    unsigned int best_x = ~0;
+    unsigned int best_y = ~0;
 
-    {
-        printf("Old method:\n");
-        uint32_t* storage_ptr_uint32 = (uint32_t*)reduce.gethostPtr_unsafe();
-        printf("Reduce %u: ", CEIL_DIV_256(collision_true_w));
-        for(unsigned int i = 0; i < CEIL_DIV_256(collision_true_w); i++){
-            printf("{%u %u}, ", storage_ptr_uint32[i*2], storage_ptr_uint32[i*2+1]);
+    for(unsigned int i = 0; i < grid_shape_r.x; i++){
+        best_x = reduce.at(i*2,0);
+        best_y = reduce.at(i*2+1,0);
+        if(best_y != ~0){
+            break;
         }
-        printf("\n");
     }
-
-    // TODO - remainder of this 
-    //  pull out the answer
-    const int NOT_SET = 0b10101;
 
     const auto end_time = std::chrono::high_resolution_clock::now();
 
     printf("Collsion calc returned %d %d in %ld us (%ld us kernel)\n",
-        NOT_SET, NOT_SET,
+        best_x, best_y,
         std::chrono::duration_cast<std::chrono::microseconds>(end_time-k_start_time).count(),
         std::chrono::duration_cast<std::chrono::microseconds>(k_end_time-k_start_time).count()
     );
 
-    // void* storage_ptr = malloc(sizeof(uint32_t)*num_reduce_storage_blocks*2);
-    //  const uint32_t* storage_ptr_uint32 = (uint32_t*)(storage_ptr);
-
-    // printf("Reduce %u: ", num_reduce_storage_blocks);
-    // for(unsigned int i = 0; i < num_reduce_storage_blocks; i++){
-    //     printf("{%u %u}, ", storage_ptr_uint32[i*2], storage_ptr_uint32[i*2+1]);
-    // }
-
+    if(bake_result){
+        bakePartWrapper(
+            best_x, best_y,
+            sheet, part,
+            part_true_h, part_true_w
+        );
+    }
 }
+
 
 void simple_cuda(const Raster& part){
     // lets compute some constants
@@ -482,10 +536,40 @@ void simple_cuda(const Raster& part){
         sheet_mem, part_mem, collisions_mem, reduce_mem,
         sheet_height_samples, sheet_width_samples, 
         part_height_samples, part_width_samples,
-        output_height_samples, output_width_samples
+        output_height_samples, output_width_samples,
+        true
     );
 
-    // return;
+    sheet_mem.Pull();
+
+    for(unsigned int i = 0; i < 8; i++){
+        printf("%08X -> %08X ... %08X -> %08X  %08X -> %08X ... %08X -> %08X  00000000 -> %08X\n", 
+            part_mem.at(0,i), sheet_mem.at(0,i),
+            part_mem.at(42,i), sheet_mem.at(42,i),
+            part_mem.at(43,i), sheet_mem.at(43,i),
+            part_mem.at(2267,i), sheet_mem.at(2267,i),
+            sheet_mem.at(2268,i)
+        );
+    }
+    printf("....\n");
+    {
+        unsigned int i = 30;
+        printf("%08X -> %08X ... %08X -> %08X  %08X -> %08X ... %08X -> %08X  00000000 -> %08X\n", 
+            part_mem.at(0,i), sheet_mem.at(0,i),
+            part_mem.at(42,i), sheet_mem.at(42,i),
+            part_mem.at(43,i), sheet_mem.at(43,i),
+            part_mem.at(2267,i), sheet_mem.at(2267,i),
+            sheet_mem.at(2268,i)
+        );
+    }
+
+    calculateCollisionsWrapper(
+        sheet_mem, part_mem, collisions_mem, reduce_mem,
+        sheet_height_samples, sheet_width_samples, 
+        part_height_samples, part_width_samples,
+        output_height_samples, output_width_samples);
+
+    return;
 
 
 
@@ -650,13 +734,13 @@ void simple_cuda(const Raster& part){
 
     printf("Bake kernel is %u x %u blocks\n", num_blocks_x, num_blocks_y);
 
-    // bakePart<block_height_rounds><<<dim3(num_blocks_x, num_blocks_y), dim3(block_width_thread)>>>(
-    //     (uint32_t*)part_devptr, part_devpitch,
-    //     (uint32_t*)sheet_devptr, sheet_devpitch,
-    //     bake_pos_x, bake_pos_y,
-    //     part.getWidth(), part.getHeight()
-    // );
-    // checkCudaError(__LINE__);
+    bakePart<block_height_rounds><<<dim3(num_blocks_x, num_blocks_y), dim3(block_width_thread)>>>(
+        (uint32_t*)part_devptr, part_devpitch,
+        (uint32_t*)sheet_devptr, sheet_devpitch,
+        bake_pos_x, bake_pos_y,
+        part.getWidth(), part.getHeight()
+    );
+    checkCudaError(__LINE__);
     
     CUDACall(cudaDeviceSynchronize());
     printf("Finished baking part\n");
