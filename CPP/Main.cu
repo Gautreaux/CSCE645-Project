@@ -125,7 +125,9 @@ __global__ void findBestPlacement(
 
     extern __shared__ uint32_t s[];
 
-    s[threadIdx.x] = ~0;
+    // initalize shared memory
+    s[threadIdx.x*2] = my_x;
+    s[threadIdx.x*2+1] = ~0;
 
     if(my_x >= output_width){
         // pass
@@ -155,68 +157,41 @@ __global__ void findBestPlacement(
                 break;
             }
             
-            s[threadIdx.x] = best_y + (y_offset * 32);
+            s[threadIdx.x*2+1] = best_y + (y_offset * 32);
             break;
         }
     }
     __syncthreads();
 
-    if(FAST_MOD_2(threadIdx.x) == 0){
-        if(s[threadIdx.x] == ~0){
-            s[threadIdx.x] = s[threadIdx.x+1];
-        }
-    }
-    __syncthreads();
-    if(FAST_MOD_4(threadIdx.x) == 0){
-        if(s[threadIdx.x] == ~0){
-            s[threadIdx.x] = s[threadIdx.x+2];
-        }
-    }
-    __syncthreads();
-    if(FAST_MOD_8(threadIdx.x) == 0){
-        if(s[threadIdx.x] == ~0){
-            s[threadIdx.x] = s[threadIdx.x+4];
-        }
-    }
-    __syncthreads();
-    if(FAST_MOD_16(threadIdx.x) == 0){
-        if(s[threadIdx.x] == ~0){
-            s[threadIdx.x] = s[threadIdx.x+8];
-        }
-    }
-    __syncthreads();
-    if(FAST_MOD_32(threadIdx.x) == 0){
-        if(s[threadIdx.x] == ~0){
-            s[threadIdx.x] = s[threadIdx.x+16];
-        }
-    }
-    __syncthreads();
-    if(FAST_MOD_64(threadIdx.x) == 0){
-        if(s[threadIdx.x] == ~0){
-            s[threadIdx.x] = s[threadIdx.x+32];
-        }
-    }
-    __syncthreads();
-    if(FAST_MOD_128(threadIdx.x) == 0){
-        if(s[threadIdx.x] == ~0){
-            s[threadIdx.x] = s[threadIdx.x+64];
-        }
-    }
-    __syncthreads();
+    #pragma unroll
+    for(unsigned int i = 1; i <= 8; i++){
+        if((threadIdx.x & ((1 << i) - 1)) == 0){
+            // when i = 1 take even threads
+            // when i = 2 take every 4th thread
+            // when i = 3 take every 8th thread
 
-    // TODO - need to return the the y value and x value from the block
-    if(threadIdx.x == 0){
-        if(s[0] == ~0){
-            storage[blockIdx.x] = s[128];
-        }else{
-            storage[blockIdx.x] = s[0];
+            // reduce, taking the left most item
+            if(s[threadIdx.x*2+1] == ~0){
+                // we did not find any valid position at this x value
+                // so take the other position
+                //  if its also invalid thats fine
+                //  strictly speaking, its not worse
+                s[threadIdx.x*2] = s[(threadIdx.x+(1 << (i - 1)))*2];
+                s[threadIdx.x*2+1] = s[(threadIdx.x+(1 << (i - 1)))*2+1];
+            }
         }
+        __syncthreads();
+    }
+
+    if(threadIdx.x == 0){
+        storage[blockIdx.x*2] = s[0];
+        storage[blockIdx.x*2+1] = s[1];
     }
 }
 
 
 // bake a part into the sheet at a given x,y location
-// TODO - incomplete
+// TODO - error in here somewhere when y != 0
 template <int n_rounds>
 __global__ void bakePart(
     uint32_t* part_ptr, const unsigned int part_pitch_uint32,
@@ -227,11 +202,6 @@ __global__ void bakePart(
     const unsigned int base_x = CLAMP_32(x);
     const unsigned int base_y = CLAMP_32(y);
     const unsigned int part_height_r32 = CEIL_DIV_32(part_height);
-
-    // TODO - remove print statement
-    if(blockIdx.x == 0 && threadIdx.x == 0){
-        printf("Starting bake part\n");
-    }
 
     // the x_block coordinate we are responsible for
     //  relative to sheet coordinates
@@ -371,7 +341,7 @@ void simple_cuda(const Raster& part){
     const int num_reduce_storage_blocks = CEIL_DIV_256(output_width_samples);
 
     void* storage_devptr;
-    CUDACall(cudaMalloc(&storage_devptr, sizeof(uint32_t)*num_reduce_storage_blocks));
+    CUDACall(cudaMalloc(&storage_devptr, sizeof(uint32_t)*num_reduce_storage_blocks*2));
 
     printf("Allocated arrays successfully.\n");
 
@@ -426,7 +396,7 @@ void simple_cuda(const Raster& part){
     checkCudaError(__LINE__);
     
     // CUDACall(cudaDeviceSynchronize());
-    findBestPlacement<<<num_reduce_storage_blocks, 256, 256*sizeof(uint32_t)>>>(
+    findBestPlacement<<<num_reduce_storage_blocks, 256, 256*sizeof(uint32_t)*2>>>(
         (uint32_t*)output_devptr, output_devpitch / sizeof(uint32_t),
         output_width_samples, output_height_reg_32,
         (uint32_t*)storage_devptr
@@ -465,6 +435,31 @@ void simple_cuda(const Raster& part){
     CUDACall(cudaDeviceSynchronize());
     printf("Finished baking part\n");
 
+    {
+        // bakePart<block_height_rounds><<<dim3(num_blocks_x, num_blocks_y), dim3(block_width_thread)>>>(
+        //     (uint32_t*)part_devptr, part_devpitch,
+        //     (uint32_t*)sheet_devptr, sheet_devpitch,
+        //     0, 1024,
+        //     part.getWidth(), part.getHeight()
+        // );
+        simpleCudaKernel<block_height_rounds><<<grid_shape, block_shape>>>(
+            (uint32_t*)sheet_devptr, sheet_devpitch / sizeof(uint32_t),
+            (uint32_t*)output_devptr, output_devpitch / sizeof(uint32_t),
+            (uint32_t*)part_devptr, part_devpitch / sizeof(uint32_t),
+            sheet_width_samples, sheet_height_samples,
+            part.getWidth(), part.getHeight()
+        );
+
+        checkCudaError(__LINE__);
+        
+        // CUDACall(cudaDeviceSynchronize());
+        findBestPlacement<<<num_reduce_storage_blocks, 256, 256*sizeof(uint32_t)*2>>>(
+            (uint32_t*)output_devptr, output_devpitch / sizeof(uint32_t),
+            output_width_samples, output_height_reg_32,
+            (uint32_t*)storage_devptr
+        );
+    }
+
     // allocate local memory to store the output
 
     // number of local bytes to represent the sheet
@@ -484,13 +479,55 @@ void simple_cuda(const Raster& part){
     const char* const output_ptr_c = (char*)output_ptr;
 
     // ptr to local memory for the storage
-    void* storage_ptr = malloc(sizeof(uint32_t)*num_reduce_storage_blocks);
+    void* storage_ptr = malloc(sizeof(uint32_t)*num_reduce_storage_blocks*2);
     const uint32_t* storage_ptr_uint32 = (uint32_t*)(storage_ptr);
 
     CUDACall(cudaMemcpy2D(sheet_ptr, row_width_bytes, sheet_devptr, sheet_devpitch, row_width_bytes, sheet_height_reg_32, cudaMemcpyDeviceToHost));
     CUDACall(cudaMemcpy2D(output_ptr, output_row_width_bytes, output_devptr, output_devpitch, output_row_width_bytes, output_height_reg_32, cudaMemcpyDeviceToHost));
-    CUDACall(cudaMemcpy(storage_ptr, storage_devptr, sizeof(uint32_t)*num_reduce_storage_blocks, cudaMemcpyDeviceToHost));
+    CUDACall(cudaMemcpy(storage_ptr, storage_devptr, sizeof(uint32_t)*num_reduce_storage_blocks*2, cudaMemcpyDeviceToHost));
     CUDACall(cudaDeviceSynchronize());
+
+    printf("========== Output: =============\n");
+    for(unsigned int j = 0; j < 8; j++){
+        for(unsigned int i = 0; i < 8; i++){
+            printf("%08X ", output_ptr_c[i + j * output_width_samples]);
+        }
+        printf("\n");
+    }
+    printf("================================\n");
+
+    printf("========== Sheet: =============\n");
+    for(unsigned int j = 0; j < 8; j++){
+        for(unsigned int i = 0; i < 8; i++){
+            printf("%08X ", sheet_ptr_c[i + j * sheet_width_samples]);
+        }
+        printf("\n");
+    }
+    printf("================================\n");
+
+    printf("========== Output (2264): =============\n");
+    for(unsigned int j = 0; j < 8; j++){
+        for(unsigned int i = 2264; i < 2264+8; i++){
+            printf("%08X ", output_ptr_c[i + j * output_width_samples]);
+        }
+        printf("\n");
+    }
+    printf("================================\n");
+
+    printf("========= Sheet (2264): ============\n");
+    for(unsigned int j = 0; j < 8; j++){
+        for(unsigned int i = 2264; i < 2264+8; i++){
+            printf("%08X ", sheet_ptr_c[i + j * sheet_width_samples]);
+        }
+        printf("\n");
+    }
+    printf("================================\n");
+
+    printf("Reduce %u: ", num_reduce_storage_blocks);
+    for(unsigned int i = 0; i < num_reduce_storage_blocks; i++){
+        printf("{%u %u}, ", storage_ptr_uint32[i*2], storage_ptr_uint32[i*2+1]);
+    }
+    printf("\n");
 
     printf("Synchronized success\n");
     printf("%ld\n", storage_ptr_uint32[0]);
