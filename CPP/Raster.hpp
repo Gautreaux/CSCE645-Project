@@ -81,7 +81,7 @@ public:
     // set the specified bit to 0
     void clearBit(const int x, const int y);
 
-    char* linearPackData(void) const;
+    char* linearPackData(char* buff = nullptr) const;
 
     // print the hex values of the cells of the raster
     //  not thread safe

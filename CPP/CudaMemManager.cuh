@@ -3,6 +3,11 @@
 #include <cinttypes>
 #include <stdio.h>
 
+#include <utility>
+#include <cassert>
+
+#include "Raster.hpp"
+
 #define CUDACall(x) {x; checkCudaError(__LINE__);}
 
 // check if a cuda error occrred and exit if so
@@ -15,75 +20,93 @@ inline void checkCudaError(const unsigned int line){
     }
 }
 
-enum ManagedMallocLocation{
-    NONE   = 0,
-    HOST   = 0b01,
-    DEVICE = 0b10,
-    BOTH   = 0b11
-};
 
-template <class InterpretedType>
-class CudaMemManager{
-    InterpretedType* host;
-    InterpretedType* device;
-    size_t host_pitch;
-    size_t device_pitch;
-    size_t width;
-    size_t height;
-    bool host_aligned;
-    bool dev_aligned;
+using InterpretedType = uint32_t;
+
+static_assert(sizeof(InterpretedType) == 4);
+
+class CudaMemManager2D{
+    // Could never get these to work
+    // // are the devices out of sync
+    // bool is_stale;
+    // // is the host or the device the leading object
+    // bool host_ahead;
+
+    // the width of a row in number of samples
+    const size_t width_samples;
+
+    // the height in number of samples
+    const size_t height_samples;
+
+    // the width in bytes of a row with no padding
+    const size_t raw_width_b;
+
+    // the width of a device row in bytes, including padding
+    const size_t device_stride;
+
+    // the width of a host row in bytes including padding
+    const size_t host_stride;
+    
+    void* const  host_ptr;
+
+    void* const device_ptr;
 
 public:
-    CudaMemManager(void): 
-        host(nullptr), device(nullptr), host_pitch(0), device_pitch(0), 
-        width(0), height(0), dev_aligned(false), host_aligned(false)
-    {}
+    CudaMemManager2D(void) = delete;
+    CudaMemManager2D(const CudaMemManager2D&) = delete;
+    CudaMemManager2D(CudaMemManager2D&&) = delete;
+
+    explicit CudaMemManager2D(const size_t w, const size_t h, const bool sync_cuda_block = true);
     
-    ~CudaMemManager(void){
-        if(host){
-            free(host);
-        }
-        if(device){
-            CUDACall(cudaFree(device));
-            CUDACall(cudaDeviceSynchronize());
-        }
+    CudaMemManager2D(const Raster& r, bool sync_cuda_block = false);
+
+    ~CudaMemManager2D(void);
+
+    inline static void Sync(void){
+        CUDACall(cudaDeviceSynchronize());
     }
 
-    // managed malloc of a single dimensional array, no alignment
-    void MangedMalloc(const unsigned int num_inst, const ManagedMallocLocation location)
-    {
-        if (num_inst == 0)
-        {
-            return;
-        }
+    // memset on both the host and device
+    void Memset(const int c, const bool sync_cuda_block = true);
 
-        const size_t raw_bytes = num_inst * sizeof(InterpretedType);
+    // push the local buffer to the device 
+    void Push(const bool sync_cuda_block = true) const;
 
-        if (location & ManagedMallocLocation::HOST)
-        {
-            if (host)
-            {
-                throw "Cannot realloc host memory (yet)";
-            }
-            host = (InterpretedType*)malloc(raw_bytes);
-            // host_pitch = ;
-        }
+    // pull the device contents to the local buffer
+    void Pull(const bool sync_cuda_block = true);
 
-        if (location & ManagedMallocLocation::DEVICE)
-        {
-            if (device)
-            {
-                throw "Cannot realloc host memory (yet)";
-            }
 
-            void* t_ptr;
-
-            CUDACall(cudaMalloc(&t_ptr, raw_bytes))
-
-            device = (InterpretedType*)t_ptr;
-            // device_pitch = t_ptr;
-        }
+    inline size_t height(void) const {
+        return height_samples;
     }
 
-    // TODO finish this class
+    inline size_t width(void) const {
+        return width_samples;
+    }
+
+    inline size_t getHostStride(void) const {
+        return host_stride;
+    }
+
+    inline size_t getDeviceStride(void) const {
+        return device_stride;
+    }
+
+    inline size_t getRawWidthBytes(void) const {
+        return raw_width_b;
+    }
+
+    // return a pair of relevant info
+    // **IN TERMS OF InterpretedType**
+    std::pair<InterpretedType*, size_t> getDeviceParameters(void) const;
+
+    const InterpretedType& at(const int x, const int y) const;
+
+    inline void* gethostPtr_unsafe(void) const {
+        return host_ptr;
+    }
+
+    inline void* getDevPtr_unsafe(void) const {
+        return device_ptr;
+    }
 };
