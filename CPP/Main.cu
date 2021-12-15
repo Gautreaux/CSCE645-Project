@@ -83,97 +83,92 @@ template <int n_rounds>
 __global__ void calculateCollisions(
     uint32_t const * const sheet_ptr, const unsigned int sheet_pitch_uint_32,
     uint32_t* const output_ptr, const unsigned int output_pitch_uint_32,
-    uint32_t const * const part_prt, const unsigned int part_pitch_uint32,
-    const unsigned int sheet_width, const unsigned int sheet_height,
-    const unsigned int part_width, const unsigned int part_height)
+    uint32_t const * const part_ptr, const unsigned int part_pitch_uint32,
+    const unsigned int output_width, const unsigned int output_height,
+    const unsigned int part_width, const unsigned int part_height,
+    const unsigned int sheet_height)
 {
 #ifdef __LINE__
     if(blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0){
         printf(
             "============== Calculate Collisions Entry ===================\n"
-            "%p %p %p\n"
-            "%u %u %u\n"
-            "%u %u %u %u\n"
-            "{%u %u %u} {%u %u %u}\n"
+            "= %p %p %p\n"
+            "= %u %u %u\n"
+            "= %u %u %u %u\n"
+            "= {%u %u %u} {%u %u %u}\n"
             "=============================================================\n",
-            sheet_ptr, output_ptr, part_prt,
+            sheet_ptr, output_ptr, part_ptr,
             sheet_pitch_uint_32, output_pitch_uint_32, part_pitch_uint32,
-            sheet_width, sheet_height, part_width, part_height,
+            output_width, output_height, part_width, part_height,
             gridDim.x, gridDim.y, gridDim.z,
             blockDim.x, blockDim.y, blockDim.z
         );
     }
 #endif
+    // each thread manages checking the whole part in a small area
+    //  save some atomicOr operation
+    // and allows for potentially alot of short circuiting if the 
+    //  part collides quickly
 
     // the x_block coordinate we are responsible for
-    //  in terms of sheet coordinates
+    //  in terms of collsion coordinates
     unsigned int my_x = blockIdx.x*blockDim.x + threadIdx.x;
 
-    if(my_x > sheet_width){
-        __syncthreads();
-        return;
-    }
-
     for(unsigned int round_y_offset = 0; round_y_offset < n_rounds; round_y_offset++){
-        // miniumum possible region of the part that can overlap
+        if(my_x >= output_width){
+            __syncthreads();
+            continue;
+        }
 
         // the y_block coordinate we are responsible for
-        //  in terms of sheet coordinate
-        unsigned int my_y = blockIdx.y*n_rounds + round_y_offset;
+        //  in terms of collision coordinate
+        const unsigned int my_y = blockIdx.y*n_rounds + round_y_offset;
 
-        // the value of the sheet at the given cell
-        const uint32_t sheet_value = sheet_ptr[fromXY(my_x, my_y, sheet_pitch_uint_32)];
+        if(my_y >= output_height){
+            break;
+        }
 
-        // now determine what part of the parts could possibly overlap this part of the sheet
+        // since we are the only people resonsible for this collision
+        //  we can just assume this is zero
+        //  this may even save a memset later
+        uint32_t out_value = 0;
 
-        // cannot go further left
-        //  anything else will have the part out the left of the sheet
-        const unsigned int max_part_x = min(my_x, part_width);
-        const unsigned int max_part_y = min(my_y, part_height);
+        for(unsigned int x_offset = 0; x_offset < part_width; x_offset++){
 
-        for(unsigned int current_part_y = 0; current_part_y <= part_width; current_part_x++){
-            __syncthreads(); // helps keep memory access alighend based on thread id
+            uint32_t part;
+            uint32_t sheet_lower;
+            uint32_t sheet_upper;
 
-            // cannot remove, other threads may have different x-bounds
-            if(current_part_x < min_part_x || current_part_x > max_part_x){
-                continue;
-            }
+            for(unsigned int y_offset = 0; y_offset < CEIL_DIV_32(part_height); y_offset++){
+                part = part_ptr[fromXY(my_x + x_offset, my_y + y_offset, part_pitch_uint32)];
 
-            for(unsigned int current_part_y = 0; current_part_y <= part_height; current_part_y++){
-                // __syncthreads();
+                sheet_lower = sheet_upper;
+                sheet_upper = ((my_y + y_offset * 32 < sheet_height) ? sheet_ptr[fromXY(my_x + x_offset, my_y + y_offset, sheet_pitch_uint_32)]
+                                                                     : 0);
 
-                if(current_part_y < min_part_y || current_part_y > max_part_y){
-                    continue;
+                out_value |= (part & sheet_lower ? 1 : 0);
+
+                for(unsigned int shift = 1; shift < 32; shift++){
+                    out_value |= (
+                        (((sheet_lower >> shift) | (sheet_upper << (32-shift))) & 
+                         (part))
+                        ? 1 : 0
+                    ) << shift;
                 }
 
-
-
+                if(out_value == ~0){
+                    goto END_COLLIDE_DETECTED;
+                }
             }
         }
 
+// Clayton will be so proud of me
+END_COLLIDE_DETECTED:
+        __syncthreads();
 
-        // TODO - actually figure out
-        // for(unsigned int current_part_x = min_part_x; current_part_x <= max_part_x; current_part_x++){ // over x
-        //     for(unsigned int current_part_y=min_part_y; current_part_y <= max_part_y; current_part_y++){ // over y
-
-        //         // TODO - no need to refetch a2 from global mem, it should be old a1
-        //         const uint32_t a1 = sheet_ptr[fromXY(current_part_x, current_part_y, part_pitch_uint32)];
-        //         const uint32_t a2 = ((current_part_y) ? (sheet_ptr[fromXY(current_part_x, current_part_y-1, part_pitch_uint32)]) : (0));
-
-        //         uint32_t c = 0;
-
-        //         #pragma unroll
-        //         for(unsigned int i = 0; i < 32; i++){
-        //             const uint32_t t = ((a1 << i) & sheet_value) | ((a2 >> (32-i)) & sheet_value);
-        //             c |= (t ? (1 << i) : 0);
-        //         }
-
-        //         atomicOr(output_ptr + fromXY(current_part_x + my_x, current_part_y + my_y, output_pitch_uint_32), c);
-        //     }
-        // }
+        // and then trivially write to output
+        output_ptr[fromXY(my_x, my_y, output_pitch_uint_32)] = out_value;
     }
-
-    __syncthreads();
 }
 
 // for each x_value find the lowest non-colliding y value
@@ -416,7 +411,7 @@ void calculateCollisionsWrapper(
 
     printf("Starting a collision calculation\n");
     const dim3 block_shape_c = dim3(std_block_width);
-    const dim3 grid_shape_c = dim3(number_horizontal_blocks(sheet.width()), number_vertical_blocks(sheet.height()));
+    const dim3 grid_shape_c = dim3(number_horizontal_blocks(collision.width()), number_vertical_blocks(collision.height()));
 
     const dim3 block_shape_r = dim3(expanded_block_with);
     const dim3 grid_shape_r = dim3(expanded_number_horizontal_block(collision.width()));
@@ -452,8 +447,9 @@ void calculateCollisionsWrapper(
         sheet_params.first, sheet_params.second,
         collision_params.first, collision_params.second,
         part_params.first, part_params.second,
-        sheet_true_w, sheet_true_h,
-        part_true_w, part_true_h
+        collision_true_w, collision_true_h,
+        part_true_w, part_true_h,
+        sheet_true_h
     );
 
     checkCudaError(__LINE__);
@@ -610,389 +606,6 @@ void simple_cuda(const Raster& part){
     // );
 
     return;
-
-
-
-    // height of the sheet in number of 32bit registers
-    constexpr size_t sheet_height_reg_32 = CEIL_DIV_32(sheet_height_samples);
-
-    // with of a row in memory in bytes
-    constexpr size_t row_width_bytes = sizeof(uint32_t)*sheet_width_samples;
-
-    // height of the output in number of 32bit registers
-    const size_t output_height_reg_32 = CEIL_DIV_32(output_height_samples);
-    
-    // width of a row in number of bytes
-    const size_t output_row_width_bytes = sizeof(uint32_t)*output_width_samples;
-
-
-    // height of the part in number of 32bit registers
-    const size_t part_height_reg_32 = CEIL_DIV_32(part_height_samples);
-
-    // width of a row in number of bytes
-    const size_t part_row_width_bytes = sizeof(uint32_t)*part_width_samples;
-    
-    // TODO - const qualify, const cast these six
-
-    // pointer to __device__ memory allocated for storing sheet
-    void* sheet_devptr;
-
-    // value of the pitch for sheet device pointer
-    //  subsequent rows are aligned to bus breaks (512 bytes?)
-    size_t sheet_devpitch;
-
-    // pointer to __device__ memory allocated for storing the part
-    void* part_devptr = nullptr;
-
-    // value of the pitch for part device pointer
-    size_t part_devpitch;
-
-    // pointer to __device__ memort allocated for storing the part
-    void* output_devptr;
-
-    // value of the pitch for output device pointer
-    size_t output_devpitch;
-
-    CUDACall(cudaMallocPitch(&sheet_devptr, &sheet_devpitch, row_width_bytes, sheet_height_reg_32));
-    CUDACall(cudaMemset2D(sheet_devptr, sheet_devpitch, 0, row_width_bytes, sheet_height_reg_32));
-    CUDACall(cudaMallocPitch(&output_devptr, &output_devpitch, output_row_width_bytes, output_height_reg_32));
-    CUDACall(cudaMemset2D(output_devptr, output_devpitch, 0, output_row_width_bytes, output_height_reg_32));
-    CUDACall(cudaMallocPitch(&part_devptr, &part_devpitch, part_row_width_bytes, part_height_reg_32));
-    CUDACall(cudaMemset2D(part_devptr, part_devpitch, 0, part_row_width_bytes, part_height_reg_32));
-    CUDACall(cudaDeviceSynchronize()); // force the prior operations to complete before proceeding
-
-    // create the storage pointer
-    const int num_reduce_storage_blocks = CEIL_DIV_256(output_width_samples);
-
-    void* storage_devptr;
-    // CUDACall(cudaMalloc(&storage_devptr, sizeof(uint32_t)*num_reduce_storage_blocks*2));
-    storage_devptr = reduce_mem.getDevPtr_unsafe();
-
-    printf("Allocated arrays successfully.\n");
-
-    // calculate block constants
-
-    // number of threads per block (width)
-    constexpr size_t block_width_thread = 32;
-
-    // number of rounds that each thread will perform
-    constexpr size_t block_height_rounds = 32;
-
-    // calculate kernel constants
-
-    // number of blocks in the kernel width
-    constexpr size_t grid_width_blocks = FAST_DIV_32(sheet_width_samples);
-    static_assert(block_width_thread == 32);
-
-    constexpr size_t grid_height_blocks = FAST_DIV_32(sheet_height_reg_32);
-    static_assert(block_height_rounds == 32);
-
-    printf(
-        "Blocks are %ld threads by %ld rounds, kernel is %ldx%ld blocks (%ldx%ld regs); "
-        "Total %ld blocks.\n",
-        block_width_thread, block_height_rounds,
-        grid_width_blocks, grid_height_blocks, 
-        sheet_width_samples, sheet_height_reg_32,
-        grid_width_blocks * grid_height_blocks
-    );
-
-    //copy in the data for the part
-    // {
-        const char* c = part.linearPackData();
-        const size_t lcl_pitch = part.getLinearPackStride();
-        CUDACall(cudaMemcpy2D(part_devptr, part_devpitch, c, lcl_pitch, part.getWidth() * sizeof(uint32_t), CEIL_DIV_32(part.getHeight()), cudaMemcpyHostToDevice))
-    //     delete c;
-    // }
-
-    // launch and run the kernel
-
-    const dim3 block_shape = dim3(block_width_thread);
-    const dim3 grid_shape = dim3(grid_width_blocks, grid_height_blocks);
-
-#ifdef DEBUG
-    printf("!> Collision Config: {%lu} {%u %u %u} {%u %u %u}\n", 
-        block_height_rounds,
-        grid_shape.x, grid_shape.y, grid_shape.z,
-        block_shape.x, block_shape.y, block_shape.z
-    );
-    printf("!> Collision Args: <ptr> %lu <ptr> %lu <prt> %lu {%lu %lu %u %u}\n",
-        sheet_devpitch / sizeof(uint32_t),  output_devpitch / sizeof(uint32_t), part_devpitch / sizeof(uint32_t),
-        sheet_width_samples, sheet_height_samples, part.getWidth(), part.getHeight()
-    );
-    printf("!> Reduce Args: <ptr> %lu %lu %lu <ptr>\n",
-        output_devpitch / sizeof(uint32_t),
-        output_width_samples, output_height_reg_32
-    );
-    printf("!> Reduce Config: {%d %u %u} {%u %u %u} {%lu}\n", 
-        dim3(num_reduce_storage_blocks).x, dim3(num_reduce_storage_blocks).y, dim3(num_reduce_storage_blocks).z,
-        dim3(256).x, dim3(256).y, dim3(256).z,
-        256*sizeof(uint32_t)*2
-    );
-    printf("!> Reduce Args: <ptr> %lu %lu %lu <ptr>\n",
-        output_devpitch / sizeof(uint32_t),
-        output_width_samples, output_height_reg_32
-    );
-#endif
-
-    const auto start_time = std::chrono::high_resolution_clock::now();
-    calculateCollisions<block_height_rounds><<<grid_shape, block_shape>>>(
-        (uint32_t*)sheet_devptr, sheet_devpitch / sizeof(uint32_t),
-        (uint32_t*)output_devptr, output_devpitch / sizeof(uint32_t),
-        (uint32_t*)part_devptr, part_devpitch / sizeof(uint32_t),
-        sheet_width_samples, sheet_height_samples,
-        part.getWidth(), part.getHeight()
-    );
-
-    checkCudaError(__LINE__);
-    
-    // CUDACall(cudaDeviceSynchronize());
-    findBestPlacement<<<num_reduce_storage_blocks, 256, 256*sizeof(uint32_t)*2>>>(
-        (uint32_t*)output_devptr, output_devpitch / sizeof(uint32_t),
-        output_width_samples, output_height_reg_32,
-        (uint32_t*)storage_devptr
-    );
-
-    checkCudaError(__LINE__);
-    
-    CUDACall(cudaDeviceSynchronize());
-    const auto end_time = std::chrono::high_resolution_clock::now();
-
-    printf("Kernel took %ld us to run\n", 
-        std::chrono::duration_cast<std::chrono::microseconds>(end_time-start_time).count()
-    );
-
-    // TODO - these should actually be computed
-    const unsigned int bake_pos_x = 0;
-    // TODO - these should actually be computed
-    const unsigned int bake_pos_y = 0;
-
-    static_assert(block_height_rounds == 32);
-    static_assert(block_width_thread == 32);
-
-    const unsigned int num_blocks_x = CEIL_DIV_32(bake_pos_x + part.getWidth()) - FAST_DIV_32(bake_pos_x);
-    const unsigned int num_blocks_y = CEIL_DIV_32(bake_pos_y + CEIL_DIV_32(part.getHeight())) - FAST_DIV_32(FAST_DIV_32(bake_pos_y));
-
-    printf("Bake kernel is %u x %u blocks\n", num_blocks_x, num_blocks_y);
-
-    bakePart<block_height_rounds><<<dim3(num_blocks_x, num_blocks_y), dim3(block_width_thread)>>>(
-        (uint32_t*)part_devptr, part_devpitch,
-        (uint32_t*)sheet_devptr, sheet_devpitch,
-        bake_pos_x, bake_pos_y,
-        part.getWidth(), part.getHeight()
-    );
-    checkCudaError(__LINE__);
-    
-    CUDACall(cudaDeviceSynchronize());
-    printf("Finished baking part\n");
-
-    // {
-    //     // bakePart<block_height_rounds><<<dim3(num_blocks_x, num_blocks_y), dim3(block_width_thread)>>>(
-    //     //     (uint32_t*)part_devptr, part_devpitch,
-    //     //     (uint32_t*)sheet_devptr, sheet_devpitch,
-    //     //     0, 1024,
-    //     //     part.getWidth(), part.getHeight()
-    //     // );
-    //     calculateCollisions<block_height_rounds><<<grid_shape, block_shape>>>(
-    //         (uint32_t*)sheet_devptr, sheet_devpitch / sizeof(uint32_t),
-    //         (uint32_t*)output_devptr, output_devpitch / sizeof(uint32_t),
-    //         (uint32_t*)part_devptr, part_devpitch / sizeof(uint32_t),
-    //         sheet_width_samples, sheet_height_samples,
-    //         part.getWidth(), part.getHeight()
-    //     );
-
-    //     checkCudaError(__LINE__);
-        
-    //     // CUDACall(cudaDeviceSynchronize());
-    //     findBestPlacement<<<num_reduce_storage_blocks, 256, 256*sizeof(uint32_t)*2>>>(
-    //         (uint32_t*)output_devptr, output_devpitch / sizeof(uint32_t),
-    //         output_width_samples, output_height_reg_32,
-    //         (uint32_t*)storage_devptr
-    //     );
-    // }
-
-    // allocate local memory to store the output
-
-    // number of local bytes to represent the sheet
-    constexpr size_t local_sheet_bytes = row_width_bytes * sheet_height_reg_32;
-
-    // number of local bytes to represent the output
-    const size_t local_output_bytes = output_row_width_bytes * output_height_reg_32;
-
-    // ptr to local memory for the sheet
-    void* sheet_ptr = malloc(local_sheet_bytes);
-    memset(sheet_ptr, 0b1010, local_sheet_bytes);
-    const char* const sheet_ptr_c = (char*)sheet_ptr;
-
-    // ptr to local memory for the output
-    void* output_ptr = malloc(local_output_bytes);
-    memset(output_ptr, 0b1010, local_output_bytes);
-    const char* const output_ptr_c = (char*)output_ptr;
-
-    // ptr to local memory for the storage
-    void* storage_ptr = malloc(sizeof(uint32_t)*num_reduce_storage_blocks*2);
-    const uint32_t* storage_ptr_uint32 = (uint32_t*)(storage_ptr);
-
-    assert(collisions_mem.getDeviceStride() == output_devpitch);
-    printf("%p %lu (%lu)\n", collisions_mem.getDevPtr_unsafe(), collisions_mem.getDeviceStride(), output_devpitch);
-
-    CUDACall(cudaMemcpy2D(sheet_ptr, row_width_bytes, sheet_devptr, sheet_devpitch, row_width_bytes, sheet_height_reg_32, cudaMemcpyDeviceToHost));
-    CUDACall(cudaMemcpy2D(output_ptr, output_row_width_bytes, output_devptr, output_devpitch, output_row_width_bytes, output_height_reg_32, cudaMemcpyDeviceToHost));
-    //CUDACall(cudaMemcpy2D(output_ptr, output_row_width_bytes, collisions_mem.getDevPtr_unsafe(), collisions_mem.getDeviceStride(), output_row_width_bytes, output_height_reg_32, cudaMemcpyDeviceToHost));
-    CUDACall(cudaMemcpy(storage_ptr, storage_devptr, sizeof(uint32_t)*num_reduce_storage_blocks*2, cudaMemcpyDeviceToHost));
-    CUDACall(cudaDeviceSynchronize());
-
-    // printf("========== Output: =============\n");
-    // for(unsigned int j = 0; j < 8; j++){
-    //     for(unsigned int i = 0; i < 8; i++){
-    //         printf("%08X ", output_ptr_c[i + j * output_width_samples]);
-    //     }
-    //     printf("\n");
-    // }
-    // printf("================================\n");
-
-    // printf("========== Sheet: =============\n");
-    // for(unsigned int j = 0; j < 8; j++){
-    //     for(unsigned int i = 0; i < 8; i++){
-    //         printf("%08X ", sheet_ptr_c[i + j * sheet_width_samples]);
-    //     }
-    //     printf("\n");
-    // }
-    // printf("================================\n");
-
-    // printf("========== Output (2264): =============\n");
-    // for(unsigned int j = 0; j < 8; j++){
-    //     for(unsigned int i = 2264; i < 2264+8; i++){
-    //         printf("%08X ", output_ptr_c[i + j * output_width_samples]);
-    //     }
-    //     printf("\n");
-    // }
-    // printf("================================\n");
-
-    // printf("========= Sheet (2264): ============\n");
-    // for(unsigned int j = 0; j < 8; j++){
-    //     for(unsigned int i = 2264; i < 2264+8; i++){
-    //         printf("%08X ", sheet_ptr_c[i + j * sheet_width_samples]);
-    //     }
-    //     printf("\n");
-    // }
-    // printf("================================\n");
-
-    printf("Reduce %u: ", num_reduce_storage_blocks);
-    for(unsigned int i = 0; i < num_reduce_storage_blocks; i++){
-        printf("{%u %u}, ", storage_ptr_uint32[i*2], storage_ptr_uint32[i*2+1]);
-    }
-    printf("\n");
-
-    printf("Synchronized success\n");
-    printf("%u\n", storage_ptr_uint32[0]);
-
-    {
-        size_t unset_memory_count = 0;
-        size_t zeroed_memeory_count = 0;
-        size_t correct_memory_count = 0;
-        // start memory check
-        for (size_t i = 0; i < local_sheet_bytes; i++)
-        {
-            if (sheet_ptr_c[i] == 0)
-            {
-                zeroed_memeory_count += 1;
-            }
-            else if (sheet_ptr_c[i] == ~0)
-            {
-                correct_memory_count += 1;
-            }
-            else
-            {
-                unset_memory_count += 1;
-            }
-        }
-
-        printf("Memcheck %ldB: %ld unset, %ld zeroed, %ld correct\n",
-               local_sheet_bytes, unset_memory_count,
-               zeroed_memeory_count, correct_memory_count);
-    }
-
-    {
-        size_t unset_memory_count = 0;
-        size_t zeroed_memeory_count = 0;
-        size_t correct_memory_count = 0;
-        // start memory check
-        for (size_t i = 0; i < local_output_bytes; i++)
-        {
-            if (output_ptr_c[i] == 0)
-            {
-                zeroed_memeory_count += 1;
-            }
-            else if (output_ptr_c[i] == ~0)
-            {
-                correct_memory_count += 1;
-            }
-            else
-            {
-                unset_memory_count += 1;
-            }
-        }
-
-        printf("Memcheck %ldB: %ld unset, %ld zeroed, %ld correct\n",
-               local_output_bytes, unset_memory_count,
-               zeroed_memeory_count, correct_memory_count);
-    }
-
-
-    // debug testing
-    printf("Debug memory checks\n");
-    sheet_mem.Pull();
-    part_mem.Pull();
-    reduce_mem.Pull();
-    collisions_mem.Pull();
-
-    printf("RDC Ptr: %p\n", reduce_mem.getDevPtr_unsafe());
-
-    printf("sheet match: %d\n", memcmp(sheet_mem.gethostPtr_unsafe(), sheet_ptr, local_sheet_bytes));
-    printf("part match: %d\n", memcmp(part_mem.gethostPtr_unsafe(), c, part.getLinearDataSize()*sizeof(uint32_t)));
-    printf("collisions match: %d\n", memcmp(collisions_mem.gethostPtr_unsafe(), output_ptr, local_output_bytes));
-    printf("reduce match: %d\n", memcmp(reduce_mem.gethostPtr_unsafe(), storage_ptr, sizeof(uint32_t)*num_reduce_storage_blocks*2));
-
-
-    printf("Local output bytes: %lu x %lu {%lu} | Maanged output bytes: %lu x %lu {??} (%lu) \n", 
-        output_row_width_bytes, output_height_reg_32,
-        local_output_bytes, 
-        collisions_mem.getHostStride(), collisions_mem.height(),
-        collisions_mem.getRawWidthBytes()
-    );
-
-    {
-        char* output_ptr_m = (char*)collisions_mem.gethostPtr_unsafe();
-        size_t unset_memory_count = 0;
-        size_t zeroed_memeory_count = 0;
-        size_t correct_memory_count = 0;
-        // start memory check
-        for (size_t i = 0; i < local_output_bytes; i++)
-        {
-            if (output_ptr_m[i] == 0)
-            {
-                zeroed_memeory_count += 1;
-            }
-            else if (output_ptr_m[i] == ~0)
-            {
-                correct_memory_count += 1;
-            }
-            else
-            {
-                unset_memory_count += 1;
-            }
-        }
-
-        printf("Memcheck %ldB: %ld unset, %ld zeroed, %ld correct\n",
-               local_output_bytes, unset_memory_count,
-               zeroed_memeory_count, correct_memory_count);
-    }
-
-    free(sheet_ptr);
-    free(output_ptr);
-    CUDACall(cudaFree(output_devptr));
-    CUDACall(cudaFree(sheet_devptr));
-    CUDACall(cudaFree(part_devptr));
 }
 
 
