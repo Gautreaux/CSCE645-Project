@@ -79,6 +79,8 @@ __device__ inline int fromXY(const unsigned int x, const unsigned int y, const u
     return y * width_stride + x;
 }
 
+
+// doesnt seem to produce the exact right results
 template <int n_rounds>
 __global__ void calculateCollisions(
     uint32_t const * const sheet_ptr, const unsigned int sheet_pitch_uint_32,
@@ -88,7 +90,7 @@ __global__ void calculateCollisions(
     const unsigned int part_width, const unsigned int part_height,
     const unsigned int sheet_height)
 {
-#ifdef __LINE__
+#ifdef DEBUG
     if(blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0){
         printf(
             "============== Calculate Collisions Entry ===================\n"
@@ -145,6 +147,14 @@ __global__ void calculateCollisions(
                 sheet_lower = sheet_upper;
                 sheet_upper = ((my_y + y_offset * 32 < sheet_height) ? sheet_ptr[fromXY(my_x + x_offset, my_y + y_offset, sheet_pitch_uint_32)]
                                                                      : 0);
+
+                if(sheet_lower == 0 && sheet_upper == 0){
+                    continue;
+                }
+                if(sheet_lower == ~0 && sheet_upper == ~0){
+                    out_value = ~0;
+                    goto END_COLLIDE_DETECTED;
+                }
 
                 out_value |= (part & sheet_lower ? 1 : 0);
 
@@ -265,7 +275,7 @@ __global__ void findBestPlacement(
 
 
 // bake a part into the sheet at a given x,y location
-// TODO - error in here somewhere when y != 0
+// TODO - critical error in here somewhere when y != 0
 template <int n_rounds>
 __global__ void bakePart(
     uint32_t const * const part_ptr, const unsigned int part_pitch_uint32,
@@ -466,7 +476,7 @@ void calculateCollisionsWrapper(
     
     reduce.Pull();
 
-#ifdef __LINE__
+#ifdef DEBUG
     printf("Reduce Results: ");
     for(unsigned int i = 0; i < grid_shape_r.x; i++){
         printf("{%u %u} ", reduce.at(i*2,0), reduce.at(i*2+1, 0));
@@ -575,23 +585,28 @@ void simple_cuda(const Raster& part){
         );
     }
 
-    collisions_mem.Memset(0);
+    calculateCollisionsWrapper(
+        sheet_mem, part_mem, collisions_mem, reduce_mem,
+        sheet_height_samples, sheet_width_samples, 
+        part_height_samples, part_width_samples,
+        output_height_samples, output_width_samples,
+        true
+    );
 
     calculateCollisionsWrapper(
         sheet_mem, part_mem, collisions_mem, reduce_mem,
         sheet_height_samples, sheet_width_samples, 
         part_height_samples, part_width_samples,
-        output_height_samples, output_width_samples
+        output_height_samples, output_width_samples,
+        false
     );
 
-    collisions_mem.Pull();
-
-    for(unsigned int i = 0; i < 8; i++){
-        for(unsigned int j = 0; j < 4; j++){
-            printf("%08X ", collisions_mem.at(j,i));
-        }
-        printf("\n");
-    }
+    // for(unsigned int i = 0; i < 8; i++){
+    //     for(unsigned int j = 0; j < 4; j++){
+    //         printf("%08X ", collisions_mem.at(j,i));
+    //     }
+    //     printf("\n");
+    // }
 
     // bakePartWrapper(
     //     0, 32,
