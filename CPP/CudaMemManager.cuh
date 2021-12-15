@@ -58,7 +58,7 @@ public:
 
     explicit CudaMemManager2D(const size_t w, const size_t h, const bool sync_cuda_block = true);
     
-    CudaMemManager2D(const Raster& r, bool sync_cuda_block = false);
+    explicit CudaMemManager2D(const Raster& r, bool sync_cuda_block = false);
 
     ~CudaMemManager2D(void);
 

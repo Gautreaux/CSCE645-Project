@@ -81,13 +81,13 @@ __device__ inline int fromXY(const unsigned int x, const unsigned int y, const u
 
 template <int n_rounds>
 __global__ void calculateCollisions(
-    uint32_t* sheet_ptr, const unsigned int sheet_pitch_uint_32,
-    uint32_t* output_ptr, const unsigned int output_pitch_uint_32,
-    uint32_t* part_prt, const unsigned int part_pitch_uint32,
+    uint32_t const * const sheet_ptr, const unsigned int sheet_pitch_uint_32,
+    uint32_t* const output_ptr, const unsigned int output_pitch_uint_32,
+    uint32_t const * const part_prt, const unsigned int part_pitch_uint32,
     const unsigned int sheet_width, const unsigned int sheet_height,
     const unsigned int part_width, const unsigned int part_height)
 {
-#ifdef DEBUG
+#ifdef __LINE__
     if(blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0){
         printf(
             "============== Calculate Collisions Entry ===================\n"
@@ -105,11 +105,8 @@ __global__ void calculateCollisions(
     }
 #endif
 
-    // if(threadIdx.x == 0){
-    //     printf("Hello from block %d %d, thread %d\n", blockIdx.x, blockIdx.y, threadIdx.x);
-    // }
-
     // the x_block coordinate we are responsible for
+    //  in terms of sheet coordinates
     unsigned int my_x = blockIdx.x*blockDim.x + threadIdx.x;
 
     if(my_x > sheet_width){
@@ -121,40 +118,59 @@ __global__ void calculateCollisions(
         // miniumum possible region of the part that can overlap
 
         // the y_block coordinate we are responsible for
-        unsigned int my_y = blockIdx.y*blockDim.y*n_rounds + round_y_offset;
+        //  in terms of sheet coordinate
+        unsigned int my_y = blockIdx.y*n_rounds + round_y_offset;
 
         // the value of the sheet at the given cell
         const uint32_t sheet_value = sheet_ptr[fromXY(my_x, my_y, sheet_pitch_uint_32)];
 
-        // TODO - remove
-        //  sheet ptr should be const; this is just for testing
-        // sheet_ptr[fromXY(my_x, my_y, sheet_pitch_uint_32)] = ~0;
+        // now determine what part of the parts could possibly overlap this part of the sheet
 
-        // TODO - check if these are really what we want
-        const unsigned int min_part_x = min(my_x, part_width);
-        const unsigned int min_part_y = min(my_y, part_height);
-        const unsigned int max_part_x = ((part_width + my_x > sheet_width) ? (part_width + my_x - sheet_width) : 0);
-        const unsigned int max_part_y = ((part_height + my_y > sheet_height) ? (part_height + my_y - sheet_height) : 0);
+        // cannot go further left
+        //  anything else will have the part out the left of the sheet
+        const unsigned int max_part_x = min(my_x, part_width);
+        const unsigned int max_part_y = min(my_y, part_height);
 
-        // TODO - actually figure out
-        for(unsigned int current_part_x = min_part_x; current_part_x <= max_part_x; current_part_x++){ // over x
-            for(unsigned int current_part_y=min_part_y; current_part_y <= max_part_y; current_part_y++){ // over y
+        for(unsigned int current_part_y = 0; current_part_y <= part_width; current_part_x++){
+            __syncthreads(); // helps keep memory access alighend based on thread id
 
-                // TODO - no need to refetch a2 from global mem, it should be old a1
-                const uint32_t a1 = sheet_ptr[fromXY(current_part_x, current_part_y, part_pitch_uint32)];
-                const uint32_t a2 = ((current_part_y) ? (sheet_ptr[fromXY(current_part_x, current_part_y-1, part_pitch_uint32)]) : (0));
+            // cannot remove, other threads may have different x-bounds
+            if(current_part_x < min_part_x || current_part_x > max_part_x){
+                continue;
+            }
 
-                uint32_t c = 0;
+            for(unsigned int current_part_y = 0; current_part_y <= part_height; current_part_y++){
+                // __syncthreads();
 
-                #pragma unroll
-                for(unsigned int i = 0; i < 32; i++){
-                    const uint32_t t = ((a1 << i) & sheet_value) | ((a2 >> (32-i)) & sheet_value);
-                    c |= (t ? (1 << i) : 0);
+                if(current_part_y < min_part_y || current_part_y > max_part_y){
+                    continue;
                 }
 
-                atomicOr(output_ptr + fromXY(current_part_x + my_x, current_part_y + my_y, output_pitch_uint_32), c);
+
+
             }
         }
+
+
+        // TODO - actually figure out
+        // for(unsigned int current_part_x = min_part_x; current_part_x <= max_part_x; current_part_x++){ // over x
+        //     for(unsigned int current_part_y=min_part_y; current_part_y <= max_part_y; current_part_y++){ // over y
+
+        //         // TODO - no need to refetch a2 from global mem, it should be old a1
+        //         const uint32_t a1 = sheet_ptr[fromXY(current_part_x, current_part_y, part_pitch_uint32)];
+        //         const uint32_t a2 = ((current_part_y) ? (sheet_ptr[fromXY(current_part_x, current_part_y-1, part_pitch_uint32)]) : (0));
+
+        //         uint32_t c = 0;
+
+        //         #pragma unroll
+        //         for(unsigned int i = 0; i < 32; i++){
+        //             const uint32_t t = ((a1 << i) & sheet_value) | ((a2 >> (32-i)) & sheet_value);
+        //             c |= (t ? (1 << i) : 0);
+        //         }
+
+        //         atomicOr(output_ptr + fromXY(current_part_x + my_x, current_part_y + my_y, output_pitch_uint_32), c);
+        //     }
+        // }
     }
 
     __syncthreads();
@@ -454,7 +470,7 @@ void calculateCollisionsWrapper(
     
     reduce.Pull();
 
-#ifdef DEBUG
+#ifdef __LINE__
     printf("Reduce Results: ");
     for(unsigned int i = 0; i < grid_shape_r.x; i++){
         printf("{%u %u} ", reduce.at(i*2,0), reduce.at(i*2+1, 0));
@@ -563,11 +579,35 @@ void simple_cuda(const Raster& part){
         );
     }
 
+    collisions_mem.Memset(0);
+
     calculateCollisionsWrapper(
         sheet_mem, part_mem, collisions_mem, reduce_mem,
         sheet_height_samples, sheet_width_samples, 
         part_height_samples, part_width_samples,
-        output_height_samples, output_width_samples);
+        output_height_samples, output_width_samples
+    );
+
+    collisions_mem.Pull();
+
+    for(unsigned int i = 0; i < 8; i++){
+        for(unsigned int j = 0; j < 4; j++){
+            printf("%08X ", collisions_mem.at(j,i));
+        }
+        printf("\n");
+    }
+
+    // bakePartWrapper(
+    //     0, 32,
+    //     sheet_mem, part_mem,
+    //     part_height_samples, part_width_samples
+    // );
+
+    // bakePartWrapper(
+    //     0, 64,
+    //     sheet_mem, part_mem,
+    //     part_height_samples, part_width_samples
+    // );
 
     return;
 
