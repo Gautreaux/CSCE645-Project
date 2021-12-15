@@ -33,5 +33,5 @@ OFiles/RasterUtils.o : RasterUtils.cpp RasterUtils.hpp pch.h
 OFiles/Packer.o : Packer.cu Packer.cuh OFiles/Raster.o pch.h
 	$(CC_COMPLIE_NO_LINK_AUTO)
 
-OFiles/CudaMemManager.o : CudaMemManager.cu CudaMemManager.cuh pch.h
+OFiles/CudaMemManager.o : CudaMemManager.cu CudaMemManager.cuh OFiles/Raster.o pch.h
 	$(CC_COMPLIE_NO_LINK_AUTO)

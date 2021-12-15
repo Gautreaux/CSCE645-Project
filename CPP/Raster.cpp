@@ -77,16 +77,18 @@ Raster::~Raster(void){
     delete[] this->data;
 }
 
-char* Raster::linearPackData(void) const {
-    char* c = (char*)malloc(this->getLinearDataSize()*sizeof(uint32_t));
+char* Raster::linearPackData(char* buff) const {
+    if(buff == nullptr){
+        buff = (char*)malloc(this->getLinearDataSize()*sizeof(uint32_t));
+    }
 
     const size_t row_len_bytes = width * sizeof(uint32_t);
 
     for(unsigned int i = 0; i < CEIL_DIV_32(height); i++){
-        memcpy(c+(i*getLinearPackStride()), data[i].getData(), row_len_bytes);
+        memcpy(buff+(i*getLinearPackStride()), data[i].getData(), row_len_bytes);
     }
 
-    return c;
+    return buff;
 }
 
 unsigned char Raster::getBit(const int x, const int y) const {
